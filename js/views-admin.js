@@ -83,17 +83,19 @@ VIEWS.staff = async () => {
         <label class="f" for="u-mobile">Mobile number (used for login)</label><input id="u-mobile" type="tel" inputmode="numeric" maxlength="10" value="${esc(u.mobile)}">
         <label class="f" for="u-role">Role</label><select id="u-role" data-change="roleChanged">${options([{ id: 'executive', name: 'Executive' }, { id: 'manager', name: 'Manager' }, { id: 'admin', name: 'Admin' }], u.role)}</select>
         <label class="f" for="u-pin">${u.id ? 'New PIN (leave empty to keep the old one)' : 'PIN (6 numbers)'}</label><input id="u-pin" class="pin" type="text" inputmode="numeric" maxlength="6" autocomplete="off" data-input="digits">
+        <label class="f" for="u-email">Email address (if any)</label><input id="u-email" type="email" inputmode="email" autocomplete="off" value="${esc(u.email || '')}">
+        <div id="u-routes-box"${u.role === 'admin' ? ' hidden' : ''}>
         <label class="f" for="u-from">Hired from</label><select id="u-from">${options(HIRED_FROM.map((x) => ({ id: x, name: x })), u.hired_from, 'Not filled')}</select>
         <label class="f" for="u-joined">Joining date</label><input id="u-joined" type="date" max="${S.boot.today}" value="${esc(u.joined_on || (u.id ? '' : S.boot.today))}">
         <label class="f" for="u-salary">Monthly salary (₹)</label><input id="u-salary" type="number" inputmode="decimal" min="0" value="${u.salary || ''}" placeholder="Leave empty if not decided">
         <label class="f" for="u-ot">Overtime pay for one hour (₹)</label><input id="u-ot" type="number" inputmode="decimal" min="0" value="${u.ot_rate || ''}">
         ${u.id ? '<p class="muted small">A new salary counts from this month. Earlier months keep the old salary.</p>' : ''}
-        <div id="u-routes-box"${u.role === 'admin' ? ' hidden' : ''}><label class="f">Routes</label>${routeChecks(u.route_ids)}</div>
+        <label class="f">Routes</label>${routeChecks(u.route_ids)}</div>
         ${u.id ? `<label class="check"><input type="checkbox" id="u-active"${u.active ? ' checked' : ''}>${u.left_on ? 'Working with us again (tick if they came back)' : 'Working with us (untick to block login)'}</label>` : ''}
         <div class="btns"><button class="btn big" data-act="saveUser" data-id="${u.id || ''}">Save</button></div>
         ${u.id && u.id !== S.user.id ? `<div class="btns"><button class="btn danger sm" data-act="delUser" data-id="${u.id}" data-name="${esc(u.name)}" data-role="${u.role}">Delete this staff member</button></div>` : ''}`);
     },
-    // An admin sees everything, so routes are only asked for a manager or an executive.
+    // An admin has only name, mobile, email and PIN. Hiring details, salary and routes are asked for a manager or an executive.
     roleChanged: (el) => ($('#u-routes-box').hidden = el.value === 'admin'),
     delUser: (el) =>
       askDelete(`Delete ${el.dataset.name}?`, `The login is removed. If orders, money or other entries are saved in their name, those entries stay and show the name as "ex ${el.dataset.role} ${el.dataset.name}".`, async () => {
@@ -105,7 +107,7 @@ VIEWS.staff = async () => {
       }),
     saveUser: async (el) => {
       const role = $('#u-role').value;
-      const body = { name: $('#u-name').value, mobile: $('#u-mobile').value, role, pin: $('#u-pin').value, hired_from: $('#u-from').value, joined_on: $('#u-joined').value, salary: $('#u-salary').value, ot_rate: $('#u-ot').value, route_ids: role === 'admin' ? [] : checkedRoutes() };
+      const body = { name: $('#u-name').value, mobile: $('#u-mobile').value, email: $('#u-email').value, role, pin: $('#u-pin').value, hired_from: $('#u-from').value, joined_on: $('#u-joined').value, salary: $('#u-salary').value, ot_rate: $('#u-ot').value, route_ids: role === 'admin' ? [] : checkedRoutes() };
       if (el.dataset.id) await api('PUT', `/users/${el.dataset.id}`, { ...body, active: $('#u-active').checked });
       else await api('POST', '/users', body);
       closeSheet();
@@ -135,6 +137,7 @@ VIEWS.staff = async () => {
           <div class="row"><b class="grow">${esc(u.name)}</b>
             ${u.left_on ? `<span class="tag cancelled">Ex ${ROLE_NAME[u.role].toLowerCase()}</span>` : !u.active ? '<span class="tag cancelled">Blocked</span>' : u.role === 'admin' ? '' : `<span class="tag ${u.attendance || 'pending'}">${ATT[u.attendance] || 'Not marked'}</span>`}</div>
           <div class="muted">${ROLE_NAME[u.role]} · ${tel(u.mobile, '')}</div>
+          ${u.email ? `<div class="muted small">${esc(u.email)}</div>` : ''}
           ${u.joined_on || u.hired_from || u.left_on ? `<div class="muted small">${esc(dots(u.joined_on ? 'Joined ' + fmtDate(u.joined_on) : '', u.hired_from ? 'from ' + u.hired_from : '', u.left_on ? 'left on ' + fmtDate(u.left_on) : ''))}</div>` : ''}
           ${isAdmin() && u.role !== 'admin' ? `<div class="muted small">${u.salary ? 'Salary ' + rs(u.salary) + ' a month' : '<span class="red">Salary not set</span>'}</div>` : ''}
           ${u.role === 'executive' ? `<div class="muted">Routes: ${u.route_ids.map(routeName).filter(Boolean).map(esc).join(', ') || '<span class="red">none given</span>'}</div>` : ''}

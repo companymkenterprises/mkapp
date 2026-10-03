@@ -5,20 +5,17 @@ const tile = (href, value, label, cls = '', sub = '') =>
   `<a class="tile ${cls}" href="${href}"><b>${esc(value)}</b><span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</a>`;
 
 VIEWS.home = async () => {
-  ACT.checkin = async () => {
-    await api('POST', '/attendance/checkin');
-    toast('Attendance marked');
-    refresh();
-  };
   const d = await api('GET', '/home');
   S.callsDue = d.callsDue;
   updateBadges();
 
   let h = `<h2>Hello, ${esc(S.user.name)}</h2><p class="muted">${fmtDate(d.today)} · ${ROLE_NAME[S.user.role]}</p>`;
   if (!isAdmin()) {
-    h += d.attendance
-      ? `<div class="banner ok">✓ Attendance marked${d.attendance.in_time ? ' at ' + esc(d.attendance.in_time) : ''}</div>`
-      : '<div class="banner warn"><span>Mark your attendance for today</span><button class="btn" data-act="checkin">I am present</button></div>';
+    // Nobody marks the own attendance; the manager marks it for everyone on the Attendance page.
+    const mark = { present: 'Present', half: 'Half day', absent: 'Absent', leave: 'Leave' }[d.attendance?.status];
+    h += mark
+      ? `<div class="banner ${d.attendance.status === 'absent' ? 'bad' : 'ok'}">Your attendance today: ${mark}</div>`
+      : `<div class="banner warn"><span>Your attendance is not marked yet. The manager marks it.</span>${isStaff() ? '<a class="btn" href="#/attendance">Mark attendance</a>' : ''}</div>`;
   }
   h += d.lowMaterials.map((m) => `<a class="banner bad" href="#/stock?tab=bottles"><span>${icon('warn', 20)} Only ${num(m.stock)} ${esc(m.name)} left. Order more.</span></a>`).join('');
 

@@ -358,7 +358,7 @@ function viewLogin() {
   };
   document.body.classList.add('login-page');
   $('#app').innerHTML = `<form class="login" data-submit="login">
-    <img class="logo" src="icons/icon-192.png" alt="">
+    <img class="logo" src="icons/maza-192.png" alt="">
     <h1>${esc(S.business)}</h1>
     <p class="muted">Login with your mobile number and PIN</p>
     <label class="f" for="l-mobile">Mobile number</label>
