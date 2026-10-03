@@ -220,7 +220,7 @@ const TITLES = {
   bill: 'Bill', leads: 'IndiaMART enquiries', expenses: 'Expenses',
   calls: 'Customers to call', orders: 'Orders', order: 'New order', shops: 'Customers', shop: 'Customer', shopform: 'Customer details', rates: 'Rates for this customer',
   stock: 'Stock', count: 'Count stock', more: 'More', alerts: 'Alerts', sales: 'Sales', staff: 'Staff', attendance: 'Attendance',
-  team: 'Team work and salary', money: 'Company money', returns: 'Returned stock', routes: 'Routes', products: 'Brands and normal rates', lost: 'Customers we lost', settings: 'Settings', pin: 'Change PIN',
+  team: 'Team work and salary', money: 'Company money and expenses', returns: 'Returned stock', routes: 'Routes', products: 'Brands and normal rates', lost: 'Customers we lost', settings: 'Settings', pin: 'Change PIN',
 };
 
 function shell(name) {

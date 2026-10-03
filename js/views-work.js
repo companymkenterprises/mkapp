@@ -234,7 +234,7 @@ function showHeld(held) {
       <li><span>+ This payment</span><span>${rs(held.added)}</span></li>
       <li><b>Total now</b><b class="red">${rs(held.total)}</b></li>
     </ul>
-    <p class="muted small">${mine ? 'When you spend from it, add it in Expenses with a note.' : 'When they spend from it, they add it in Expenses with a note.'}</p>
+    <p class="muted small">${mine ? 'When you spend from it, add the expense in "Company money and expenses".' : 'When they spend from it, they add the expense in "Company money and expenses".'}</p>
     <div class="btns"><button class="btn big" data-act="close">OK</button></div>`);
 }
 
@@ -526,9 +526,8 @@ VIEWS.bill = async (parts, query) => {
 };
 
 // ---------- expenses ----------
-VIEWS.expenses = async (parts, query) => {
-  Object.assign(ACT, {
-    month: (el) => el.value && go(`#/expenses?month=${el.value}`),
+// Adding an expense: from the Expenses page and from "Company money with me".
+const EXPENSE_ACT = {
     addExpense: () =>
       sheet(`<h3>Add expense</h3>
         <label class="f">Money spent on</label>
@@ -539,7 +538,7 @@ VIEWS.expenses = async (parts, query) => {
         <input id="x-date" type="date" max="${S.boot.today}" value="${S.boot.today}">
         <label class="f">Paid by</label>
         <div class="chips" id="x-mode">${S.boot.payModes.map((m, i) => `<button class="chip${i ? '' : ' on'}" data-act="chip" data-val="${m}">${m}</button>`).join('')}</div>
-        <label class="f" for="x-note">Note – compulsory (where, vehicle, bill number, paid to whom)</label>
+        <label class="f" for="x-note">Note (vehicle, bill number, paid to whom) – compulsory only for "Other"</label>
         <input id="x-note" type="text">
         <div class="btns"><button class="btn big" data-act="saveExpense">Save</button></div>`),
     saveExpense: async () => {
@@ -549,6 +548,11 @@ VIEWS.expenses = async (parts, query) => {
       toast('Expense saved');
       refresh();
     },
+};
+
+VIEWS.expenses = async (parts, query) => {
+  Object.assign(ACT, EXPENSE_ACT, {
+    month: (el) => el.value && go(`#/expenses?month=${el.value}`),
     delExpense: (el) =>
       askDelete('Delete this expense?', el.dataset.text, async () => {
         await api('POST', `/expenses/${el.dataset.id}/delete`);
@@ -616,8 +620,29 @@ VIEWS.returns = async (parts, query) => {
 // more = the extra is theirs; less = they add it, or say where and when it was used.
 const CHECK_TEXT = { ok: '✓ Correct', extra: 'Extra (theirs)', added: 'Less – added from own money', used: 'Less – used for work' };
 
+// The admin does not hold company money in the daily work: they see what every staff member holds and spent.
+async function staffMoney() {
+  const d = await api('GET', '/money/staff');
+  if (!d.list.length) return `<div class="empty">No staff yet. Add them in More → Staff.</div><div class="btns"><a class="btn light" href="#/money/${d.me}">Company money with me</a></div>`;
+  return `<div class="banner ${d.total > 0 ? 'warn' : 'ok'}"><div><div class="small">Company money with all staff now</div><div class="balance">${rs(d.total)}</div></div></div>
+    <p class="muted small">Money that customers paid into the staff member's own hands or account, minus the expenses they entered and what they gave back. Open a person to see every expense.</p>
+    ${searchBox('Search name')}
+    ${quickChips([['', 'All'], ['has', 'Has company money'], ['executive', 'Executives'], ['manager', 'Managers'], ['left', 'Left us']])}
+    <div id="quick-list">${d.list
+      .map(
+        (p) => `<a class="card" href="#/money/${p.id}" data-item data-k="${p.left_on ? 'left' : p.role}${p.should > 0 ? '|has' : ''}">
+          <div class="row"><b class="grow">${esc(p.name)}</b><b class="${p.should > 0 ? 'red' : ''}">${rs(p.should)}</b></div>
+          <div class="muted small">${esc(dots(p.left_on ? 'Ex ' + ROLE_NAME[p.role].toLowerCase() : ROLE_NAME[p.role], p.checked ? 'balance checked ' + fmtDate(p.checked) : 'balance never checked'))}</div>
+          <div class="small">${esc(dots('Collected ' + rs(p.collected), `Expenses ${rs(p.spent)} (${p.expense_count})`, p.returned ? 'Gave back ' + rs(p.returned) : '', p.given ? 'Given ' + rs(p.given) : ''))}</div>
+        </a>`
+      )
+      .join('')}</div>
+    <div class="btns"><a class="btn light sm" href="#/money/${d.me}">Company money with me</a></div>`;
+}
+
 VIEWS.money = async (parts) => {
   const other = +parts[1] || 0;
+  if (!other && isAdmin()) return staffMoney();
   let d;
   const save = async (body) => {
     const r = await api('POST', '/money/check', body);
@@ -625,7 +650,7 @@ VIEWS.money = async (parts) => {
     toast(r.action === 'ok' ? '✓ Your balance is correct' : r.action === 'extra' ? `Saved. ${rs(r.diff)} extra is yours` : 'Saved');
     refresh();
   };
-  Object.assign(ACT, {
+  Object.assign(ACT, EXPENSE_ACT, {
     checkMoney: () =>
       sheet(`<h3>Check my balance</h3>
         <p class="muted">You should have ${rs(d.should)} of company money now.</p>
@@ -644,7 +669,7 @@ VIEWS.money = async (parts) => {
         <div class="chips" id="mc-type">${S.boot.expenseTypes.map((t) => `<button class="chip" data-act="chip" data-val="${esc(t)}">${esc(t)}</button>`).join('')}</div>
         <label class="f" for="mc-used">Amount used (₹)</label><input id="mc-used" type="number" inputmode="decimal" min="1" max="${short}" value="${short}">
         <label class="f" for="mc-date">When</label><input id="mc-date" type="date" max="${S.boot.today}" value="${S.boot.today}">
-        <label class="f" for="mc-note">Where (shop, petrol pump, paid to whom)</label><input id="mc-note" type="text">
+        <label class="f" for="mc-note">Where (shop, petrol pump, paid to whom) – compulsory only for "Other"</label><input id="mc-note" type="text">
         <p class="muted small">It is saved as an expense. If the amount used is smaller than ${rs(short)}, you add the rest from your money.</p>
         <div class="btns"><button class="btn big light" data-act="checkUsed" data-has="${has}">Save where it was used</button></div>`);
     },
@@ -705,6 +730,21 @@ VIEWS.money = async (parts) => {
             .join('')
         : '<p class="muted">No balance check yet.</p>'
     }
+    <h3>${d.own ? 'My expenses' : 'Expenses entered'} (${d.expenses.length})</h3>
+    ${d.own ? `<div class="btns"><button class="btn big" data-act="addExpense">${icon('plus', 20)} Add expense</button></div>` : ''}
+    ${
+      d.expenses.length
+        ? `<div class="table-wrap"><table><tr><th>Date</th><th>Spent on</th><th class="num">Amount</th></tr>
+          ${d.expenses.map((e) => `<tr><td>${fmtDate(e.date)}</td><td class="wrap">${esc(e.category)}<div class="muted small">${esc(dots(e.mode, e.note))}</div></td><td class="num">${rs(e.amount)}</td></tr>`).join('')}</table></div>`
+        : '<p class="muted">No expenses entered.</p>'
+    }
+    <h3>Money collected into ${d.own ? 'your' : 'their'} account (${d.payments.length})</h3>
+    ${
+      d.payments.length
+        ? `<div class="table-wrap"><table><tr><th>Date</th><th>Customer</th><th class="num">Amount</th></tr>
+          ${d.payments.map((p) => `<tr><td>${fmtDate(p.date)}</td><td class="wrap">${isStaff() ? `<a href="#/shop/${p.customer_id}">${esc(p.customer)}</a>` : esc(p.customer)}<div class="muted small">${esc(p.mode)}</div></td><td class="num">${rs(p.amount)}</td></tr>`).join('')}</table></div>`
+        : '<p class="muted">Nothing collected.</p>'
+    }
     <h3>Money given and taken back</h3>
     ${
       d.moves.length
@@ -751,7 +791,8 @@ VIEWS.more = async () => {
   } else {
     h += item('#/stock', 'box', 'Stock') + item('#/stock?tab=bottles', 'bottle', 'Bottles');
   }
-  h += item('#/money', 'wallet', 'Company money with me') + item('#/expenses', 'wallet', 'Expenses') + item('#/returns', 'box', 'Returned stock') + item('#/alerts', 'bell', 'Alerts') + item('#/pin', 'lock', 'Change PIN');
+  // Managers and executives enter and see their expenses inside "Company money and expenses"; the admin has the page of all expenses.
+  h += (isAdmin() ? item('#/money', 'wallet', 'Company money with staff') + item('#/expenses', 'wallet', 'Expenses') : item('#/money', 'wallet', 'Company money and expenses')) + item('#/returns', 'box', 'Returned stock') + item('#/alerts', 'bell', 'Alerts') + item('#/pin', 'lock', 'Change PIN');
   h += `<button data-act="logout"><span class="ico">${icon('power')}</span>Logout</button></div>`;
   return h;
 };
