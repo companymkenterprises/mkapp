@@ -195,3 +195,11 @@ body.login-page .login { margin-top: 6vh; padding: 28px 22px; background: var(--
 .login h1 { text-align: center; font-size: 22px; margin: 0 0 4px; color: var(--green-dark); }
 .login h2 { text-align: center; color: var(--green-dark); }
 .login p { text-align: center; }
+
+/* Items hidden by a search or filter stay hidden, whatever their layout. */
+[hidden] { display: none !important; }
+/* Red warning triangle (low bottles). */
+.warn-ic { color: var(--red); display: inline-flex; vertical-align: middle; }
+a.card { display: block; color: inherit; text-decoration: none; }
+.tag.assigned { background: var(--green-soft); color: var(--green-dark); }
+.tag.final { background: var(--red-soft); color: var(--red); }

@@ -48,7 +48,7 @@ VIEWS.shops = async (parts, query) => {
       <a class="btn" href="#/shopform?type=shop">${icon('plus', 18)} Add shop</a>
       <a class="btn" href="#/shopform?type=customer">${icon('plus', 18)} Add customer</a>
     </div>
-    <div class="filters"><input id="s-q" type="search" placeholder="Search name or mobile" data-input="search" aria-label="Search"></div>
+    <div class="filters"><input id="s-q" type="search" placeholder="Search anything: name, mobile, area, route, balance" data-input="search" aria-label="Search"></div>
     <div class="filters">
       <select id="s-route" data-change="reload" aria-label="Route">${options([...myRoutes(), { id: 'none', name: 'No route yet' }], '', 'All routes')}</select>
     </div>
@@ -63,14 +63,16 @@ GLOBAL_ACT.pay = (el) =>
     <label class="f" for="pay-amount">Amount received (₹)</label>
     <input id="pay-amount" type="number" inputmode="decimal" min="1">
     <div class="chips" id="pay-mode">${S.boot.payModes.map((m, i) => `<button class="chip${i ? '' : ' on'}" data-act="chip" data-val="${m}">${m}</button>`).join('')}</div>
+    ${moneyWentTo('pay-to', 'My account')}
     <label class="f" for="pay-note">Note (if any)</label>
     <input id="pay-note" type="text">
     <div class="btns"><button class="btn big" data-act="savePay" data-id="${esc(el.dataset.id)}">Save</button></div>`);
 GLOBAL_ACT.savePay = async (el) => {
-  const r = await api('POST', '/payments', { customer_id: el.dataset.id, amount: $('#pay-amount').value, mode: chipVal('pay-mode'), note: $('#pay-note').value });
+  const r = await api('POST', '/payments', { customer_id: el.dataset.id, amount: $('#pay-amount').value, mode: chipVal('pay-mode'), to: chipVal('pay-to'), note: $('#pay-note').value });
   closeSheet();
   toast(`Saved. Balance now ${rs(r.balance)}`);
   refresh();
+  showHeld(r.held);
 };
 
 // Every product that has a rate for this customer: the special rate if set, otherwise the normal rate.
@@ -99,6 +101,7 @@ function ratesHtml(rates) {
 
 VIEWS.shop = async (parts) => {
   const id = +parts[1];
+  let d;
   Object.assign(ACT, {
     reactivate: async () => {
       await api('POST', `/customers/${id}/reactivate`);
@@ -110,6 +113,42 @@ VIEWS.shop = async (parts) => {
         <label class="f" for="ar-route">Route</label>
         <select id="ar-route">${options(myRoutes(), '', 'Select route')}</select>
         <div class="btns"><button class="btn big" data-act="saveAssign">Save route</button></div>`),
+    // Returned stock: pieces of each product, one line per product.
+    returnStock: async () => {
+      const prods = S.boot.products.filter((p) => (d.rates[p.id] || p.default_rate) > 0);
+      if (!prods.length) throw new Error('No rates are set for this customer, so the value of a return cannot be counted');
+      const row = () => `<div class="row ret-row" style="gap:8px;margin-bottom:8px">
+        <select class="grow" aria-label="Product">${options(prods.map((p) => ({ id: p.id, name: `${p.brand} ${p.pack}` })), '', 'Select product')}</select>
+        <input style="width:96px" type="number" inputmode="numeric" min="1" placeholder="Pieces" aria-label="Pieces"></div>`;
+      ACT.moreReturn = () => $('#ret-rows').insertAdjacentHTML('beforeend', row());
+      sheet(`<h3>Stock returned by ${esc(d.customer.name)}</h3>
+        <label class="f">Why is it returned?</label>
+        <div class="chips" id="ret-reason">${S.boot.returnReasons.map((t) => `<button class="chip" data-act="chip" data-val="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+        <label class="f">Which product, how many pieces (not boxes)</label>
+        <div id="ret-rows">${row()}</div>
+        <div class="btns"><button class="btn light sm" data-act="moreReturn">+ Another product</button></div>
+        <label class="f" for="ret-note">Note (if any)</label><input id="ret-note" type="text" placeholder="Example: batch of last week, lids were loose">
+        <p class="muted small">The value of the pieces goes off the balance of the customer. Returned pieces are not added back to the stock.</p>
+        <div class="btns"><button class="btn big" data-act="saveReturn">Save return</button></div>`);
+    },
+    saveReturn: async () => {
+      if (!chipVal('ret-reason')) throw new Error('Select why it is returned');
+      const items = $$('.ret-row').map((r) => ({ product_id: $('select', r).value, pieces: $('input', r).value })).filter((x) => x.product_id && x.pieces);
+      const r = await api('POST', '/returns', { customer_id: id, reason: chipVal('ret-reason'), note: $('#ret-note').value, items });
+      closeSheet();
+      toast(`Return saved: ${rs(r.amount)} off. Balance now ${rs(r.balance)}`);
+      refresh();
+    },
+    delPayment: (el) =>
+      askDelete('Delete this money received?', `${el.dataset.text}. The balance of the customer goes up by this amount.`, async () => {
+        await api('POST', `/payments/${el.dataset.id}/delete`);
+        refresh();
+      }),
+    delCustomer: (el) =>
+      askDelete(`Delete ${el.dataset.name}?`, 'All its orders, money received, calls and special rates are deleted with it.', async () => {
+        await api('POST', `/customers/${id}/delete`);
+        location.replace('#/shops');
+      }),
     saveAssign: async () => {
       if (!$('#ar-route').value) throw new Error('Select the route');
       await api('PUT', `/customers/${id}/route`, { route_id: $('#ar-route').value });
@@ -118,7 +157,7 @@ VIEWS.shop = async (parts) => {
       refresh();
     },
   });
-  const d = await api('GET', `/customers/${id}`);
+  d = await api('GET', `/customers/${id}`);
   const c = d.customer;
   const attrs = `data-id="${c.id}" data-name="${esc(c.name)}"`;
 
@@ -156,10 +195,19 @@ VIEWS.shop = async (parts) => {
 
   h += `<h3>Money received</h3>${
     d.payments.length
-      ? `<div class="table-wrap"><table><tr><th>Date</th><th class="num">Amount</th><th>How</th><th>Collected by</th></tr>
-        ${d.payments.map((p) => `<tr><td>${fmtDate(p.date)}</td><td class="num">${rs(p.amount)}</td><td>${esc(p.mode)}</td><td>${esc(p.by)}</td></tr>`).join('')}</table></div>`
+      ? `<div class="table-wrap"><table><tr><th>Date</th><th class="num">Amount</th><th>How</th><th>Collected by</th>${isAdmin() ? '<th></th>' : ''}</tr>
+        ${d.payments
+          .map(
+            (p) => `<tr><td>${fmtDate(p.date)}</td><td class="num">${rs(p.amount)}</td><td>${esc(p.mode)}</td><td>${esc(p.by)}${p.to_company ? '<div class="muted small">into the company account</div>' : ''}</td>
+              ${isAdmin() ? `<td><button class="btn danger sm" data-act="delPayment" data-id="${p.id}" data-text="${esc(`${rs(p.amount)} received on ${fmtDate(p.date)} by ${p.by}`)}">Delete</button></td>` : ''}</tr>`
+          )
+          .join('')}</table></div>`
       : '<p class="muted">No money received yet.</p>'
   }`;
+
+  h += `<h3>Returned stock</h3>
+    <div class="btns"><button class="btn light" data-act="returnStock">Return stock (damaged, bad smell...)</button></div>
+    ${d.returns.length ? d.returns.map((r) => returnCard(r, false)).join('') : '<p class="muted">Nothing returned.</p>'}`;
 
   h += `<h3>Calls</h3>${
     d.calls.length
@@ -167,6 +215,10 @@ VIEWS.shop = async (parts) => {
         ${d.calls.map((l) => `<tr><td>${fmtDate(l.date)}</td><td class="wrap">${esc(LAST_CALL[l.outcome])}${l.reason && l.outcome !== 'no_answer' ? ' – ' + esc(l.reason) : ''}</td><td>${esc(l.by)}</td></tr>`).join('')}</table></div>`
       : '<p class="muted">No calls yet.</p>'
   }`;
+  if (isAdmin()) {
+    h += `<h3>Delete</h3><p class="muted small">Only for a wrong or test entry. For a customer who stopped buying, use "Not needed" instead.</p>
+      <div class="btns"><button class="btn danger" data-act="delCustomer" ${attrs}>Delete this customer</button></div>`;
+  }
   return h;
 };
 
@@ -356,10 +408,26 @@ VIEWS.stock = async (parts, query) => {
       sheet(`<h3>${esc(mat(el.dataset.id).name)}</h3>${
         r.list.length
           ? `<div class="table-wrap"><table><tr><th>Date</th><th></th><th class="num">Qty</th><th>By</th></tr>
-            ${r.list.map((t) => `<tr><td>${fmtDate(t.date)}</td><td class="wrap">${TYPE[t.type]}${t.note ? `<div class="muted small">${esc(t.note)}</div>` : ''}</td><td class="num">${t.qty > 0 ? '+' : ''}${num(t.qty)}</td><td>${esc(t.by || '')}</td></tr>`).join('')}</table></div>`
+            ${r.list
+              .map(
+                (t) => `<tr><td>${fmtDate(t.date)}</td><td class="wrap">${TYPE[t.type]}${t.note ? `<div class="muted small">${esc(t.note)}</div>` : ''}</td><td class="num">${t.qty > 0 ? '+' : ''}${num(t.qty)}</td><td>${esc(t.by || '')}
+                  ${isAdmin() && t.type !== 'production' ? `<div><button class="btn danger sm" data-act="delBottleEntry" data-id="${t.id}" data-text="${esc(`${TYPE[t.type]} ${t.qty > 0 ? '+' : ''}${num(t.qty)} on ${fmtDate(t.date)}`)}">Delete</button></div>` : ''}</td></tr>`
+              )
+              .join('')}</table></div>
+            ${isAdmin() ? '<p class="muted small">Bottles "Used" are removed by deleting the Boxes made entry in Stock.</p>' : ''}`
           : '<p class="muted">Nothing yet.</p>'
       }`);
     },
+    delBottleEntry: (el) =>
+      askDelete('Delete this bottle entry?', el.dataset.text, async () => {
+        await api('POST', `/materials/entries/${el.dataset.id}/delete`);
+        refresh();
+      }),
+    delStockEntry: (el) =>
+      askDelete('Delete this entry?', `${el.dataset.text}. For boxes made, the bottles it used come back.`, async () => {
+        await api('POST', `/stock/entries/${el.dataset.id}/delete`);
+        refresh();
+      }),
     editBottle: (el) => {
       const m = el.dataset.id ? mat(el.dataset.id) : { name: '', low_at: 0 };
       sheet(`<h3>${el.dataset.id ? 'Edit' : 'New bottle type'}</h3>
@@ -380,11 +448,12 @@ VIEWS.stock = async (parts, query) => {
   let h = `<div class="tabs"><a href="#/stock" class="${tab === 'boxes' ? 'on' : ''}">Boxes</a><a href="#/stock?tab=bottles" class="${tab === 'bottles' ? 'on' : ''}">Bottles</a></div>`;
 
   if (tab === 'bottles') {
-    h += '<p class="muted">Empty bottles, jars and pouches. They reduce by themselves when boxes are made.</p>';
+    h += `<p class="muted">Empty bottles, jars and pouches. They reduce by themselves when boxes are made.</p>
+      ${searchBox('Search bottle type')}${quickChips([['', 'All'], ['low', 'Low only']])}<div id="quick-list">`;
     h += d.materials
       .map(
-        (m) => `<div class="card">
-          <div class="row"><b class="grow">${esc(m.name)}</b>${m.low ? '<span class="tag low">LOW</span>' : ''}</div>
+        (m) => `<div class="card" data-item data-k="${m.low ? 'low' : ''}">
+          <div class="row"><b class="grow">${esc(m.name)}</b>${m.low ? `<span class="warn-ic" title="Low stock">${icon('warn', 22)}</span> <span class="tag low">LOW</span>` : ''}</div>
           <div class="balance ${m.low ? 'red' : ''}">${num(m.stock)}</div>
           <div class="muted small">Alert when ${num(m.low_at)} or less</div>
           <div class="btns">
@@ -395,6 +464,7 @@ VIEWS.stock = async (parts, query) => {
         </div>`
       )
       .join('');
+    h += '</div>';
     if (isAdmin()) h += '<div class="btns"><button class="btn light" data-act="editBottle">+ New bottle type</button></div>';
     return h;
   }
@@ -402,12 +472,15 @@ VIEWS.stock = async (parts, query) => {
   const shown = query.all ? d.products : d.products.filter((p) => p.opening || p.made || p.sold || p.closing || p.pending || p.corrected);
   h += `<div class="filters"><input type="date" data-change="date" value="${d.date}" max="${d.today}" aria-label="Date"></div>`;
   if (isStaff()) h += `<div class="btns"><button class="btn" data-act="made">${icon('plus', 18)} Boxes made</button><a class="btn light" href="#/count">Count stock</a></div>`;
+  const tags = (p) => [p.made ? 'made' : '', p.sold ? 'sold' : '', p.pending ? 'ordered' : '', p.closing > 0 ? 'stock' : ''].filter(Boolean).join('|');
   h += shown.length
-    ? `<div class="table-wrap"><table>
+    ? `${searchBox('Search brand or box type')}
+      ${quickChips([['', 'All'], ['made', 'Made'], ['sold', 'Sold'], ['ordered', 'Ordered'], ['stock', 'In stock']])}
+      <div class="table-wrap"><table id="quick-list">
         <tr><th>Product</th><th class="num">Opening</th><th class="num">Made</th><th class="num">Sold</th><th class="num">${d.date === d.today ? 'In stock' : 'Closing'}</th><th class="num">Ordered</th></tr>
         ${shown
           .map(
-            (p) => `<tr><td>${esc(p.brand)}<div class="muted small">${esc(p.pack)}</div></td>
+            (p) => `<tr data-item data-k="${tags(p)}"><td>${esc(p.brand)}<div class="muted small">${esc(p.pack)}</div></td>
               <td class="num">${num(p.opening)}</td><td class="num">${p.made ? '+' + num(p.made) : '0'}</td><td class="num">${p.sold ? '−' + num(p.sold) : '0'}</td>
               <td class="num"><b class="${p.closing < 0 ? 'red' : ''}">${num(p.closing)}</b>${p.corrected ? `<div class="red small">${p.corrected > 0 ? '+' : ''}${p.corrected} in count</div>` : ''}</td>
               <td class="num">${p.pending ? num(p.pending) : ''}</td></tr>`
@@ -417,6 +490,21 @@ VIEWS.stock = async (parts, query) => {
       <p class="muted small">Opening + Made − Sold = In stock. "Ordered" = boxes in orders not yet delivered. A red number below zero means boxes were delivered before they were entered as made.</p>`
     : '<div class="empty">No stock yet. Enter the boxes after packing.</div>';
   if (!query.all && shown.length < d.products.length) h += '<div class="btns"><button class="btn light sm" data-act="showAll">Show all products</button></div>';
+
+  // The entries behind the numbers of this day; the admin can delete a wrong one.
+  if (isStaff()) {
+    const entries = (await api('GET', '/stock/entries?date=' + encodeURIComponent(d.date))).list;
+    if (entries.length) {
+      const WHAT = { production: 'Boxes made', count: 'Count correction' };
+      h += `<h3>Entries of ${dayLabel(d.date)}</h3><div class="table-wrap"><table><tr><th>Entry</th><th class="num">Boxes</th><th>By</th>${isAdmin() ? '<th></th>' : ''}</tr>
+        ${entries
+          .map(
+            (e) => `<tr><td>${WHAT[e.type]}<div class="muted small">${esc(e.brand)} ${esc(e.pack)}</div></td><td class="num">${e.qty > 0 ? '+' : ''}${num(e.qty)}</td><td>${esc(e.by || '')}</td>
+              ${isAdmin() ? `<td><button class="btn danger sm" data-act="delStockEntry" data-id="${e.id}" data-text="${esc(`${WHAT[e.type]}: ${e.qty > 0 ? '+' : ''}${e.qty} ${e.brand} ${e.pack}`)}">Delete</button></td>` : ''}</tr>`
+          )
+          .join('')}</table></div>`;
+    }
+  }
 
   if (d.counts.length) {
     h += `<h3>Stock count differences</h3><div class="table-wrap"><table><tr><th>Date</th><th>Product</th><th class="num">App</th><th class="num">Counted</th><th class="num">Difference</th><th>By</th></tr>

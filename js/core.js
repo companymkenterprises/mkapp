@@ -36,6 +36,8 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   inbox: '<path d="M4 13l2.5-8h11L20 13v6H4z"/><path d="M4 13h5a3 3 0 0 0 6 0h5"/>',
   send: '<path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
+  warn: '<path d="M12 3.5l9.5 17h-19z"/><path d="M12 10v5"/><path d="M12 17.6v.4"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   wallet: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18"/><path d="M16 15h2"/><path d="M6 6l9-3 1 3"/>',
 };
 const icon = (name, size = 22) =>
@@ -130,7 +132,67 @@ GLOBAL_ACT.chip = (el) => {
   $$('.chip', el.parentElement).forEach((c) => c.classList.toggle('on', c === el));
   if (el.dataset.target) $('#' + el.dataset.target).value = el.dataset.val;
 };
-const chipVal = (groupId) => $(`#${groupId} .chip.on`)?.dataset.val ?? '';
+function chipVal(groupId) {
+  return $(`#${groupId} .chip.on`)?.dataset.val ?? '';
+}
+// ---------- deleting (admin only): always asks first ----------
+let deleteJob = null;
+function askDelete(title, text, job) {
+  deleteJob = job;
+  sheet(`<h3>${esc(title)}</h3>
+    <p>${esc(text)}</p>
+    <p class="red small"><b>This cannot be undone.</b></p>
+    <div class="btns"><button class="btn big danger" data-act="yesDelete">Yes, delete</button><button class="btn light" data-act="close">No, keep it</button></div>`);
+}
+GLOBAL_ACT.yesDelete = async () => {
+  const job = deleteJob;
+  if (!job) return;
+  await job();
+  deleteJob = null;
+  closeSheet();
+  toast('Deleted');
+};
+
+// ---------- search and filter on a list that is already on the screen ----------
+// searchBox() draws the box; every item of the list (a card, or a table row) is shown only when its text has the typed words.
+// An item can carry data-k="made|sold": the filter chips (quickChips) then show only items that have the chosen one.
+const searchBox = (placeholder = 'Search') =>
+  `<div class="filters"><input id="quick-q" type="search" placeholder="${esc(placeholder)}" data-input="quick" aria-label="${esc(placeholder)}" autocomplete="off"></div>`;
+const quickChips = (list) =>
+  `<div class="chips" id="quick-k">${list.map(([val, label], i) => `<button class="chip${i ? '' : ' on'}" data-act="quickChip" data-val="${esc(val)}">${esc(label)}</button>`).join('')}</div>`;
+function quickApply() {
+  const box = $('#quick-list');
+  if (!box) return;
+  // Spaces, commas and the rupee sign do not matter: "1kg" finds "1 kg", "5000" finds "₹5,000".
+  // Line breaks become "|" first, so that two numbers on different lines are not read as one.
+  const squash = (s) => s.toLowerCase().replace(/[\n\t]+/g, '|').replace(/[ ,₹]/g, '');
+  const words = ($('#quick-q')?.value || '').split(/\s+/).map(squash).filter(Boolean);
+  const k = chipVal('quick-k');
+  let shown = 0;
+  const items = $$('[data-item]', box);
+  for (const el of items) {
+    el.hidden = false; // the text of a hidden item cannot be read line by line
+    const text = squash(el.innerText);
+    const ok = words.every((w) => text.includes(w)) && (!k || (el.dataset.k || '').split('|').includes(k));
+    el.hidden = !ok;
+    if (ok) shown++;
+  }
+  let none = $('#quick-none');
+  if (!none) {
+    none = document.createElement('div');
+    none.id = 'quick-none';
+    none.className = 'empty';
+    none.textContent = 'Nothing found. Change the search or the filter.';
+    box.after(none);
+  }
+  none.hidden = shown > 0 || !items.length;
+}
+GLOBAL_ACT.quick = quickApply;
+GLOBAL_ACT.quickChip = (el) => {
+  GLOBAL_ACT.chip(el);
+  quickApply();
+};
+
 // PIN and mobile boxes accept numbers only.
 GLOBAL_ACT.digits = (el) => {
   const clean = el.value.replace(/\D/g, '');
@@ -158,7 +220,7 @@ const TITLES = {
   bill: 'Bill', leads: 'IndiaMART enquiries', expenses: 'Expenses',
   calls: 'Customers to call', orders: 'Orders', order: 'New order', shops: 'Customers', shop: 'Customer', shopform: 'Customer details', rates: 'Rates for this customer',
   stock: 'Stock', count: 'Count stock', more: 'More', alerts: 'Alerts', sales: 'Sales', staff: 'Staff', attendance: 'Attendance',
-  routes: 'Routes', products: 'Brands and normal rates', lost: 'Customers we lost', settings: 'Settings', pin: 'Change PIN',
+  team: 'Team work and salary', money: 'Company money', returns: 'Returned stock', routes: 'Routes', products: 'Brands and normal rates', lost: 'Customers we lost', settings: 'Settings', pin: 'Change PIN',
 };
 
 function shell(name) {
@@ -327,6 +389,7 @@ VIEWS.pin = async () => {
 async function logout() {
   await api('POST', '/logout').catch(() => {});
   session.set('');
+  Object.assign(ORDER_FILTER, { q: '', route: '', user: '', mine: '' });
   S.user = null;
   S.boot = null;
   location.hash = '';
