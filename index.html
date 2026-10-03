@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a3f32">
+  <!-- The page may only load its own files and talk to its own Supabase project. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://yvbwefogjbvgijevfjcz.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <meta name="referrer" content="same-origin">
+  <title>Paste Manager</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="sheet" class="sheet">
+    <div class="sheet-back" data-act="close"></div>
+    <div class="sheet-box"><button class="sheet-x" data-act="close" aria-label="Close">&times;</button><div id="sheet-body"></div></div>
+  </div>
+  <div id="popup" class="popup"></div>
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/views-work.js"></script>
+  <script src="js/views-shops.js"></script>
+  <script src="js/views-admin.js"></script>
+  <script src="js/start.js"></script>
+</body>
+</html>
