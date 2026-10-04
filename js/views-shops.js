@@ -89,7 +89,7 @@ function ratesHtml(rates) {
       const html = `<details class="rates"${open ? ' open' : ''}>
         <summary><b>${esc(b.name)}</b><span class="muted small">${plural(rows.length, 'rate')}</span></summary>
         <table>${rows
-          .map((x) => `<tr><td>${esc(x.p.pack)}</td><td class="num"><b>${rs(x.rate)}</b></td></tr>`)
+          .map((x) => `<tr><td>${esc(x.p.pack)}<div class="muted small">${packPieces(x.p)}</div></td><td class="num"><b>${rs(x.rate)}</b></td></tr>`)
           .join('')}</table>
       </details>`;
       open = false;
@@ -434,8 +434,14 @@ VIEWS.stock = async (parts, query) => {
       sheet(`<h3>${el.dataset.id ? 'Edit' : 'New bottle type'}</h3>
         <label class="f" for="e-name">Name</label><input id="e-name" value="${esc(m.name)}">
         <label class="f" for="e-low">Give low stock alert when this many or less are left</label><input id="e-low" type="number" inputmode="numeric" min="0" value="${m.low_at}">
-        <div class="btns"><button class="btn big" data-act="saveBottle" data-id="${esc(el.dataset.id || '')}">Save</button></div>`);
+        <div class="btns"><button class="btn big" data-act="saveBottle" data-id="${esc(el.dataset.id || '')}">Save</button></div>
+        ${el.dataset.id && isAdmin() ? `<div class="btns"><button class="btn danger sm" data-act="delBottle" data-id="${esc(el.dataset.id)}" data-name="${esc(m.name)}">Delete this bottle type</button></div>` : ''}`);
     },
+    delBottle: (el) =>
+      askDelete(`Delete the bottle type ${el.dataset.name}?`, 'All its entries (came in, used, counts) are deleted with it. Not possible while a box type still uses this bottle.', async () => {
+        await api('POST', `/materials/${el.dataset.id}/delete`);
+        refresh();
+      }),
     saveBottle: async (el) => {
       const body = { name: $('#e-name').value, low_at: $('#e-low').value };
       await (el.dataset.id ? api('PUT', `/materials/${el.dataset.id}`, body) : api('POST', '/materials', body));
@@ -460,7 +466,7 @@ VIEWS.stock = async (parts, query) => {
           <div class="btns">
             ${isStaff() ? `<button class="btn sm" data-act="addBottles" data-id="${m.id}">+ New stock came</button><button class="btn light sm" data-act="countBottles" data-id="${m.id}">Count</button>` : ''}
             <button class="btn light sm" data-act="history" data-id="${m.id}">History</button>
-            ${isAdmin() ? `<button class="btn light sm" data-act="editBottle" data-id="${m.id}">Edit</button>` : ''}
+            ${isAdmin() ? `<button class="btn light sm" data-act="editBottle" data-id="${m.id}">Edit</button><button class="btn danger sm" data-act="delBottle" data-id="${m.id}" data-name="${esc(m.name)}">Delete</button>` : ''}
           </div>
         </div>`
       )
@@ -470,10 +476,10 @@ VIEWS.stock = async (parts, query) => {
     return h;
   }
 
-  const shown = query.all ? d.products : d.products.filter((p) => p.opening || p.made || p.sold || p.closing || p.pending || p.corrected);
+  const shown = query.all ? d.products : d.products.filter((p) => p.opening || p.made || p.sold || p.sold_pieces || p.closing || p.loose || p.pending || p.corrected);
   h += `<div class="filters"><input type="date" data-change="date" value="${d.date}" max="${d.today}" aria-label="Date"></div>`;
   if (isStaff()) h += `<div class="btns"><button class="btn" data-act="made">${icon('plus', 18)} Boxes made</button><a class="btn light" href="#/count">Count stock</a></div>`;
-  const tags = (p) => [p.made ? 'made' : '', p.sold ? 'sold' : '', p.pending ? 'ordered' : '', p.closing > 0 ? 'stock' : ''].filter(Boolean).join('|');
+  const tags = (p) => [p.made ? 'made' : '', p.sold || p.sold_pieces ? 'sold' : '', p.pending ? 'ordered' : '', p.closing > 0 ? 'stock' : ''].filter(Boolean).join('|');
   h += shown.length
     ? `${searchBox('Search brand or box type')}
       ${quickChips([['', 'All'], ['made', 'Made'], ['sold', 'Sold'], ['ordered', 'Ordered'], ['stock', 'In stock']])}
@@ -482,8 +488,8 @@ VIEWS.stock = async (parts, query) => {
         ${shown
           .map(
             (p) => `<tr data-item data-k="${tags(p)}"><td>${esc(p.brand)}<div class="muted small">${esc(p.pack)}</div></td>
-              <td class="num">${num(p.opening)}</td><td class="num">${p.made ? '+' + num(p.made) : '0'}</td><td class="num">${p.sold ? '−' + num(p.sold) : '0'}</td>
-              <td class="num"><b class="${p.closing < 0 ? 'red' : ''}">${num(p.closing)}</b>${p.corrected ? `<div class="red small">${p.corrected > 0 ? '+' : ''}${p.corrected} in count</div>` : ''}</td>
+              <td class="num">${num(p.opening)}</td><td class="num">${p.made ? '+' + num(p.made) : '0'}</td><td class="num">${p.sold ? '−' + num(p.sold) : '0'}${p.sold_pieces ? `<div class="muted small">−${num(p.sold_pieces)} pcs</div>` : ''}</td>
+              <td class="num"><b class="${p.closing < 0 ? 'red' : ''}">${num(p.closing)}</b>${p.loose ? `<div class="muted small">+ ${num(p.loose)} loose pcs</div>` : ''}${p.corrected ? `<div class="red small">${p.corrected > 0 ? '+' : ''}${p.corrected} in count</div>` : ''}</td>
               <td class="num">${p.pending ? num(p.pending) : ''}</td></tr>`
           )
           .join('')}

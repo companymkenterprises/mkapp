@@ -48,7 +48,7 @@ VIEWS.sales = async (parts, query) => {
     ${
       d.products.length
         ? '<h3>Sales by product</h3>' +
-          table('<th>Product</th><th class="num">Boxes</th><th class="num">Sales</th>', d.products.map((p) => `<tr><td>${esc(p.brand)} ${esc(p.pack)}</td><td class="num">${num(p.qty)}</td><td class="num">${rs(p.amount)}</td></tr>`).join(''))
+          table('<th>Product</th><th class="num">Boxes</th><th class="num">Sales</th>', d.products.map((p) => `<tr><td>${esc(p.brand)} ${esc(p.pack)}</td><td class="num">${num(p.qty)}${p.pieces ? `<div class="muted small">+ ${num(p.pieces)} pcs</div>` : ''}</td><td class="num">${rs(p.amount)}</td></tr>`).join(''))
         : ''
     }
     ${
@@ -394,21 +394,56 @@ VIEWS.products = async () => {
       toast('Box type added');
       refresh();
     },
+    // A drum is sold whole. Only its size in kg is asked: "20 kg Drum", "25 kg Drum"...
+    newDrum: () =>
+      sheet(`<h3>New drum size</h3>
+        <label class="f" for="nd-kg">How many kg is in one drum?</label><input id="nd-kg" type="number" inputmode="decimal" min="1" placeholder="Example: 20 or 25">
+        <p class="muted small">The drum is added under every brand. Then type its rate here, or inside a customer.</p>
+        <div class="btns"><button class="btn big" data-act="saveDrum">Save</button></div>`),
+    saveDrum: async () => {
+      const kg = Number($('#nd-kg').value);
+      if (!(kg > 0)) throw new Error('Enter how many kg is in one drum');
+      await api('POST', '/packs', { name: `${kg} kg Drum`, unit: 'Drum', pieces: 1, detail: `1 drum of ${kg} kg` });
+      closeSheet();
+      await loadBoot();
+      toast(`${kg} kg Drum added`);
+      refresh();
+    },
+    // Admin: a brand, box type or drum size added by mistake.
+    delBrand: (el) =>
+      askDelete(`Remove the brand ${el.dataset.name}?`, 'It is not offered any more. If orders, stock or rates already use it, those old entries stay as they are.', async () => {
+        await api('POST', `/brands/${el.dataset.id}/delete`);
+        await loadBoot();
+        refresh();
+      }),
+    delPack: (el) =>
+      askDelete(`Remove ${el.dataset.name}?`, 'It is removed under every brand and not offered any more. If orders, stock or rates already use it, those old entries stay as they are.', async () => {
+        await api('POST', `/packs/${el.dataset.id}/delete`);
+        await loadBoot();
+        refresh();
+      }),
   });
   await loadBoot();
   return `<p class="muted">Normal rate is used for every customer that has no rate of its own. A customer's own rates are set inside that customer.</p>
-    <div class="btns"><button class="btn light" data-act="newBrand">+ New brand</button><button class="btn light" data-act="newPack">+ New box type</button></div>
+    <div class="btns"><button class="btn light" data-act="newBrand">+ New brand</button><button class="btn light" data-act="newPack">+ New box type</button><button class="btn light" data-act="newDrum">+ New drum size</button></div>
     ${S.boot.brands
       .map(
-        (b) => `<h3>${esc(b.name)}</h3><div class="card">${S.boot.products
+        (b) => `<div class="row"><h3 class="grow">${esc(b.name)}</h3><button class="btn danger sm" data-act="delBrand" data-id="${b.id}" data-name="${esc(b.name)}">Remove brand</button></div><div class="card">${S.boot.products
           .filter((p) => p.brand_id === b.id)
           .map(
-            (p) => `<div class="row" style="padding:5px 0"><label class="grow" for="n-${p.id}">${esc(p.pack)}<div class="muted small">${num(p.pieces)} pieces</div></label>
+            (p) => `<div class="row" style="padding:5px 0"><label class="grow" for="n-${p.id}">${esc(p.pack)}<div class="muted small">${packPieces(p)}</div></label>
               <input id="n-${p.id}" style="width:120px" type="number" inputmode="decimal" min="0" data-rate="${p.id}" value="${p.default_rate || ''}" placeholder="₹"></div>`
           )
           .join('')}</div>`
       )
       .join('')}
+    <h3>Box types and drum sizes</h3>
+    <div class="card">${S.boot.packs
+      .map(
+        (k) => `<div class="row" style="padding:5px 0"><div class="grow">${esc(k.name)}<div class="muted small">${packPieces(k)}</div></div>
+          <button class="btn danger sm" data-act="delPack" data-id="${k.id}" data-name="${esc(k.name)}">Remove</button></div>`
+      )
+      .join('')}</div>
     <div class="sticky-foot"><button class="btn big" data-act="saveNormal">Save normal rates</button></div>`;
 };
 
@@ -557,13 +592,6 @@ VIEWS.leads = async (parts, query) => {
 
 VIEWS.settings = async () => {
   const d = await api('GET', '/settings');
-  ACT.wipeAll = async () => {
-    if ($('#wipe-word').value !== 'DELETE') throw new Error('Type DELETE in capital letters to confirm');
-    await api('POST', '/admin/wipe', { pin: $('#wipe-pin').value, confirm: $('#wipe-word').value, staff: $('#wipe-staff').checked });
-    await loadBoot();
-    toast('All data deleted');
-    go('#/home');
-  };
   ACT.saveSettings = async () => {
     await api('PUT', '/settings', {
       business_name: $('#set-name').value,
@@ -585,17 +613,7 @@ VIEWS.settings = async () => {
     ${d.indiamart_error ? `<div class="banner bad">${esc(d.indiamart_error)}</div>` : ''}
     <label class="f" for="set-im">${d.indiamart_on ? 'New key (leave empty to keep the saved one)' : 'IndiaMART CRM key'}</label><input id="set-im" type="text" autocomplete="off">
     ${d.indiamart_on ? '<label class="check"><input type="checkbox" id="set-im-off">Disconnect IndiaMART</label>' : ''}
-    <div class="btns"><button class="btn big" type="submit">Save</button></div></form>
-
-    <h3>Delete all data</h3>
-    <div class="card">
-      <p class="muted">For starting clean after testing. Deletes every customer, order, money received, call, stock and bottle entry, attendance, expense, enquiry and alert.</p>
-      <p class="muted small">Kept: admin logins, these settings, brands, box types, bottle types and normal rates. One wrong entry is deleted on its own page instead (order, customer, expense...).</p>
-      <label class="check"><input type="checkbox" id="wipe-staff">Also delete staff (not admins) and routes</label>
-      <label class="f" for="wipe-pin">Your PIN</label>${pinBox('wipe-pin', 'off')}
-      <label class="f" for="wipe-word">Type DELETE in capital letters</label><input id="wipe-word" type="text" autocomplete="off">
-      <div class="btns"><button class="btn danger" data-act="wipeAll">Delete all data</button></div>
-    </div>`;
+    <div class="btns"><button class="btn big" type="submit">Save</button></div></form>`;
 };
 
 // Executives must not open manager pages even by typing the address (the server also refuses).

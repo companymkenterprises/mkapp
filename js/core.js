@@ -70,6 +70,10 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // Only a shop needs a route. A direct customer without one shows nothing.
 const routeText = (route, type) => route || (type === 'customer' ? '' : 'No route yet');
 const dots = (...parts) => parts.filter(Boolean).join(' · ');
+// How many pieces one box, bag or drum holds, said plainly: "1 box = 30 pieces". A drum is one piece: "1 drum".
+const packPieces = (p) => (p.pieces > 1 ? `1 ${String(p.unit).toLowerCase()} = ${num(p.pieces)} pieces` : `1 ${String(p.unit).toLowerCase()}`);
+// How much of a product: "× 2" for full boxes, "× 2 + 5 pieces" with loose pieces, "5 pieces" for loose pieces only.
+const qtyText = (qty, pieces) => (pieces ? `${qty ? `× ${qty} + ` : ''}${plural(pieces, 'piece')}` : `× ${qty}`);
 // An address is a Google Maps link (pasted from "Share" in Google Maps), plain text, or both. Tapping it opens Google Maps:
 // the pasted link itself, or a search for the typed address.
 const mapLink = (address, cls = '') => {

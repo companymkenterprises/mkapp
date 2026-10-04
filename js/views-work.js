@@ -167,7 +167,7 @@ function orderCard(o, today, showCustomer = true) {
     </div>
     ${showCustomer ? `<div class="muted">${dots(esc(routeText(o.route, o.customer_type)), tel(o.mobile, ''))}</div>` : ''}
     ${showCustomer && o.address && o.status === 'pending' ? `<div class="muted small">${mapLink(o.address)}</div>` : ''}
-    <ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} × ${i.qty}</span><span>${rs(i.amount)}</span></li>`).join('')}
+    <ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} ${qtyText(i.qty, i.pieces)}</span><span>${rs(i.amount)}</span></li>`).join('')}
       <li><b>Total</b><b>${rs(o.total)}</b></li></ul>
     ${o.note ? `<div class="muted">Note: ${esc(o.note)}</div>` : ''}
     <div class="muted small">Order taken by <b>${esc(o.taken_by_name)}</b> on ${fmtDate(o.taken_date)}${showCustomer ? ` · #${o.id}` : ''}</div>
@@ -200,7 +200,9 @@ GLOBAL_ACT.delOrder = (el) => {
   const extra = o.status === 'delivered' ? ` The ${o.received ? rs(o.received) + ' received and the ' : ''}boxes it took from stock are removed too.` : '';
   askDelete(`Delete order #${o.id} of ${o.customer}?`, `Order of ${rs(o.total)}, taken by ${o.taken_by_name}.${extra}`, async () => {
     await api('POST', `/orders/${o.id}/delete`);
-    refresh();
+    // On the bill page the order is gone, so go back to the orders.
+    if (location.hash.startsWith('#/bill/')) location.replace('#/orders');
+    else refresh();
   });
 };
 
@@ -374,14 +376,19 @@ VIEWS.orders = async (parts, query) => {
 
 VIEWS.order = async (parts) => {
   const id = +parts[1];
-  const qty = {};
+  const qty = {}; // full boxes of each product
+  const loose = {}; // loose pieces of each product
   let brandId = S.boot.brands[0]?.id;
   let d;
   const rateOf = (p) => d.rates[p.id] || p.default_rate || 0;
-  const lines = () => S.boot.products.filter((p) => qty[p.id] > 0).map((p) => ({ p, qty: qty[p.id], amount: qty[p.id] * rateOf(p) }));
+  // One loose piece costs the rate of the box ÷ pieces in the box.
+  const lines = () =>
+    S.boot.products
+      .filter((p) => qty[p.id] > 0 || loose[p.id] > 0)
+      .map((p) => ({ p, qty: qty[p.id] || 0, pieces: loose[p.id] || 0, amount: Math.round(((qty[p.id] || 0) * rateOf(p) + ((loose[p.id] || 0) * rateOf(p)) / p.pieces) * 100) / 100 }));
 
   const productsHtml = () => {
-    const count = (b) => S.boot.products.filter((p) => p.brand_id === b.id && qty[p.id] > 0).length;
+    const count = (b) => S.boot.products.filter((p) => p.brand_id === b.id && (qty[p.id] > 0 || loose[p.id] > 0)).length;
     return `<div class="chips">${S.boot.brands
       .map((b) => `<button class="chip${b.id === brandId ? ' on' : ''}" data-act="brand" data-id="${b.id}">${esc(b.name)}${count(b) ? ` (${count(b)})` : ''}</button>`)
       .join('')}</div>
@@ -390,8 +397,8 @@ VIEWS.order = async (parts) => {
         .map((p) => {
           const rate = rateOf(p);
           const pack = S.boot.packs.find((k) => k.id === p.pack_id);
-          return `<div class="card row">
-            <div class="grow"><b>${esc(p.pack)}</b><div class="muted small">${esc(pack?.detail || '')}</div>
+          return `<div class="card"><div class="row">
+            <div class="grow"><b>${esc(p.pack)}</b><div class="small"><b>${packPieces(p)}</b></div><div class="muted small">${esc(pack?.detail || '')}</div>
               ${rate ? `<div>${rs(rate)} per ${esc(p.unit.toLowerCase())}</div>` : '<div class="red small">Rate not set. Ask manager.</div>'}</div>
             ${
               rate
@@ -399,6 +406,12 @@ VIEWS.order = async (parts) => {
                    <input type="number" inputmode="numeric" min="0" data-input="qty" data-id="${p.id}" value="${qty[p.id] || ''}" placeholder="0" aria-label="Quantity">
                    <button data-act="plus" data-id="${p.id}" aria-label="More">+</button></div>`
                 : isStaff() ? `<a class="btn light sm" href="#/rates/${id}">Set rate</a>` : ''
+            }</div>
+            ${
+              rate && p.pieces > 1
+                ? `<div class="row" style="margin-top:8px"><label class="grow muted small" for="loose-${p.id}">Loose pieces (${rs(Math.round((rate / p.pieces) * 100) / 100)} each)</label>
+                   <input id="loose-${p.id}" style="width:96px" type="number" inputmode="numeric" min="0" max="${p.pieces - 1}" data-input="loose" data-id="${p.id}" value="${loose[p.id] || ''}" placeholder="0"></div>`
+                : ''
             }
           </div>`;
         })
@@ -408,7 +421,7 @@ VIEWS.order = async (parts) => {
     const l = lines();
     if (!l.length) return '<p class="muted">Press + to add boxes.</p>';
     const total = l.reduce((s, x) => s + x.amount, 0);
-    return `<ul class="items">${l.map((x) => `<li><span>${esc(x.p.brand)} ${esc(x.p.pack)} × ${x.qty}</span><span>${rs(x.amount)}</span></li>`).join('')}
+    return `<ul class="items">${l.map((x) => `<li><span>${esc(x.p.brand)} ${esc(x.p.pack)} ${qtyText(x.qty, x.pieces)}</span><span>${rs(x.amount)}</span></li>`).join('')}
       <li><b>Order total</b><b>${rs(total)}</b></li>
       <li><span>Balance after delivery</span><span class="red">${rs(d.customer.balance + total)}</span></li></ul>`;
   };
@@ -423,13 +436,14 @@ VIEWS.order = async (parts) => {
     minus: (el) => { qty[el.dataset.id] = Math.max(0, (qty[el.dataset.id] || 0) - 1); draw(); },
     // Typing must not redraw the input itself, or the keyboard closes.
     qty: (el) => { qty[el.dataset.id] = Math.max(0, parseInt(el.value, 10) || 0); $('#order-sum').innerHTML = sumHtml(); },
+    loose: (el) => { loose[el.dataset.id] = Math.max(0, parseInt(el.value, 10) || 0); $('#order-sum').innerHTML = sumHtml(); },
     // An old order from before the app: its own date, already delivered, no change in stock.
     pastToggle: (el) => {
       $('#o-past-box').hidden = !el.checked;
       $('#o-new-box').hidden = el.checked;
     },
     saveOrder: async () => {
-      const items = lines().map((x) => ({ product_id: x.p.id, qty: x.qty }));
+      const items = lines().map((x) => ({ product_id: x.p.id, qty: x.qty, pieces: x.pieces }));
       if (!items.length) throw new Error('Add at least one product');
       if ($('#o-past')?.checked) {
         if (!$('#o-past-date').value) throw new Error('Select the date of the old order');
@@ -488,13 +502,14 @@ VIEWS.bill = async (parts, query) => {
   const id = +parts[1];
   const fileName = `Bill-${id}.pdf`;
   const o = (await api('GET', `/orders/${id}`)).order;
+  ORDERS.set(o.id, o); // for "Delete this order"
   // The bill link: works without login, but only with the long random code of this order.
   const pdfUrl = `${API_URL}/bill/${o.bill_token}`;
 
   const message = [
     `*${S.business}*`,
     `Bill no ${o.id} · ${fmtDate(o.taken_date)}`,
-    ...o.items.map((i) => `${i.brand} ${i.pack} × ${i.qty} = ${rs(i.amount)}`),
+    ...o.items.map((i) => `${i.brand} ${i.pack} ${qtyText(i.qty, i.pieces)} = ${rs(i.amount)}`),
     `*Total: ${rs(o.total)}*`,
     o.status === 'pending' && o.balance ? `Old balance: ${rs(o.balance)}\nTotal to pay: ${rs(o.balance + o.total)}` : '',
     o.status === 'delivered' ? `Balance to pay now: ${rs(o.balance)}` : '',
@@ -540,7 +555,7 @@ VIEWS.bill = async (parts, query) => {
   return `${query.new ? `<div class="banner ok">✓ Order #${o.id} saved</div>` : ''}
     <h2>${esc(o.customer)}</h2>
     <p class="muted">${dots(`Bill no ${o.id}`, fmtDate(o.taken_date), tel(o.mobile, ''))}</p>
-    <div class="card"><ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} × ${i.qty}</span><span>${rs(i.amount)}</span></li>`).join('')}
+    <div class="card"><ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} ${qtyText(i.qty, i.pieces)}</span><span>${rs(i.amount)}</span></li>`).join('')}
       <li><b>Total</b><b>${rs(o.total)}</b></li>
       ${o.status === 'pending' && o.balance ? `<li><span>Old balance</span><span>${rs(o.balance)}</span></li><li><b>Total to pay</b><b class="red">${rs(o.balance + o.total)}</b></li>` : ''}
       ${o.status === 'delivered' ? `<li><b>Balance to pay now</b><b class="red">${rs(o.balance)}</b></li>` : ''}</ul></div>
@@ -550,7 +565,8 @@ VIEWS.bill = async (parts, query) => {
       <button class="btn light" data-act="shareBill">Share PDF file</button>
       <a class="btn light" href="${pdfUrl}" target="_blank" rel="noopener">Open bill (PDF)</a>
     </div>
-    <div class="btns"><a class="btn light" href="#/orders">Done</a></div>`;
+    <div class="btns"><a class="btn light" href="#/orders">Done</a></div>
+    ${isAdmin() ? `<div class="btns"><button class="btn danger sm" data-act="delOrder" data-id="${o.id}">Delete this order</button></div>` : ''}`;
 };
 
 // ---------- expenses ----------
