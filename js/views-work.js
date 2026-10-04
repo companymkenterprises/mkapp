@@ -15,6 +15,8 @@ VIEWS.home = async () => {
     const mark = { present: 'Present', half: 'Half day', absent: 'Absent', leave: 'Leave' }[d.attendance?.status];
     h += mark
       ? `<div class="banner ${d.attendance.status === 'absent' ? 'bad' : 'ok'}">Your attendance today: ${mark}</div>`
+      : isSunday(d.today)
+      ? '<div class="banner ok">Sunday – paid weekly off</div>'
       : `<div class="banner warn"><span>Your attendance is not marked yet. The manager marks it.</span>${isStaff() ? '<a class="btn" href="#/attendance">Mark attendance</a>' : ''}</div>`;
   }
   h += d.lowMaterials.map((m) => `<a class="banner bad" href="#/stock?tab=bottles"><span>${icon('warn', 20)} Only ${num(m.stock)} ${esc(m.name)} left. Order more.</span></a>`).join('');
@@ -38,7 +40,7 @@ VIEWS.home = async () => {
       ${tile('#/shops?sort=balance', rs(d.outstanding), 'Total balance to collect', 'warn')}
       ${isAdmin() ? tile('#/sales', rs(d.monthSales), 'Sales this month') : ''}
       ${tile('#/calls', d.callsDue, 'Customers to call today')}
-      ${tile('#/attendance', `${d.present} / ${d.staff}`, 'Staff present')}
+      ${tile('#/attendance', `${d.present} / ${d.staff}`, 'Staff present', '', isSunday(d.today) ? 'Sunday – weekly off' : '')}
       ${tile('#/stock', num(d.boxes.made), 'Boxes made today')}
       ${tile('#/stock', num(d.boxes.sold), 'Boxes sold today')}
       ${tile('#/orders', num(d.boxes.ordered), 'Boxes ordered, to deliver')}
@@ -164,6 +166,7 @@ function orderCard(o, today, showCustomer = true) {
       ${late ? '<span class="tag late">LATE</span>' : ''}<span class="tag ${o.status}">${o.status === 'pending' ? 'To deliver' : o.status === 'delivered' ? 'Delivered' : 'Cancelled'}</span>
     </div>
     ${showCustomer ? `<div class="muted">${dots(esc(routeText(o.route, o.customer_type)), tel(o.mobile, ''))}</div>` : ''}
+    ${showCustomer && o.address && o.status === 'pending' ? `<div class="muted small">${mapLink(o.address)}</div>` : ''}
     <ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} × ${i.qty}</span><span>${rs(i.amount)}</span></li>`).join('')}
       <li><b>Total</b><b>${rs(o.total)}</b></li></ul>
     ${o.note ? `<div class="muted">Note: ${esc(o.note)}</div>` : ''}
@@ -420,9 +423,21 @@ VIEWS.order = async (parts) => {
     minus: (el) => { qty[el.dataset.id] = Math.max(0, (qty[el.dataset.id] || 0) - 1); draw(); },
     // Typing must not redraw the input itself, or the keyboard closes.
     qty: (el) => { qty[el.dataset.id] = Math.max(0, parseInt(el.value, 10) || 0); $('#order-sum').innerHTML = sumHtml(); },
+    // An old order from before the app: its own date, already delivered, no change in stock.
+    pastToggle: (el) => {
+      $('#o-past-box').hidden = !el.checked;
+      $('#o-new-box').hidden = el.checked;
+    },
     saveOrder: async () => {
       const items = lines().map((x) => ({ product_id: x.p.id, qty: x.qty }));
       if (!items.length) throw new Error('Add at least one product');
+      if ($('#o-past')?.checked) {
+        if (!$('#o-past-date').value) throw new Error('Select the date of the old order');
+        const done = $('#o-past-done').checked;
+        const r = await api('POST', '/orders', { customer_id: id, items, note: $('#o-note').value, past_date: $('#o-past-date').value, delivered: done, collected: done ? $('#o-past-paid').value : '', mode: chipVal('o-past-mode') });
+        toast(`Old order saved. Balance now ${rs(r.balance)}`);
+        return location.replace(`#/shop/${id}`);
+      }
       const r = await api('POST', '/orders', { customer_id: id, items, deliver_on: $('#o-date').value, next_call_days: $('#o-next').value, note: $('#o-note').value });
       toast('Order saved');
       // Straight to the bill. "replace" so that Back does not open this form again and save the order twice.
@@ -438,6 +453,21 @@ VIEWS.order = async (parts) => {
     <div id="order-products">${productsHtml()}</div>
     <h3>Order</h3>
     <div class="card" id="order-sum">${sumHtml()}</div>
+    ${
+      isStaff()
+        ? `<label class="check"><input type="checkbox" id="o-past" data-change="pastToggle">This is an old order (from before today)</label>
+    <div id="o-past-box" hidden>
+      <label class="f" for="o-past-date">Date of the order</label>
+      <input id="o-past-date" type="date" max="${addDaysStr(t, -1)}">
+      <label class="check"><input type="checkbox" id="o-past-done" checked>It was delivered on that date</label>
+      <label class="f" for="o-past-paid">Money received for it (₹)</label>
+      <input id="o-past-paid" type="number" inputmode="decimal" min="0" placeholder="0 if not paid yet">
+      <div class="chips" id="o-past-mode">${S.boot.payModes.map((m, i) => `<button class="chip${i ? '' : ' on'}" data-act="chip" data-val="${m}">${m}</button>`).join('')}</div>
+      <p class="muted small">An old order does not change the stock or the call dates. What is not paid is added to the balance of the customer.</p>
+    </div>`
+        : ''
+    }
+    <div id="o-new-box">
     <label class="f" for="o-date">Deliver on</label>
     <div class="chips">
       <button class="chip on" data-act="chip" data-target="o-date" data-val="${t}">Today</button>
@@ -447,6 +477,7 @@ VIEWS.order = async (parts) => {
     <input id="o-date" type="date" min="${t}" value="${t}">
     <label class="f" for="o-next">Call this customer again after (days)</label>
     <input id="o-next" type="number" inputmode="numeric" min="1" max="90" value="${c.call_every_days}">
+    </div>
     <label class="f" for="o-note">Note (if any)</label>
     <textarea id="o-note"></textarea>
     <div class="btns"><button class="btn big" data-act="saveOrder">Save order</button></div>`;

@@ -75,21 +75,21 @@ GLOBAL_ACT.savePay = async (el) => {
   showHeld(r.held);
 };
 
-// Every product that has a rate for this customer: the special rate if set, otherwise the normal rate.
+// Every product that has a rate for this customer: the rate set for this customer, otherwise the normal rate.
+// Nothing marks which is which: the word "special" would be mixed up with the brand SPECIAL SHAHI.
 function ratesHtml(rates) {
   let open = true;
   const blocks = S.boot.brands
     .map((b) => {
       const rows = S.boot.products
         .filter((p) => p.brand_id === b.id)
-        .map((p) => ({ p, rate: rates[p.id] || p.default_rate || 0, special: !!rates[p.id] }))
+        .map((p) => ({ p, rate: rates[p.id] || p.default_rate || 0 }))
         .filter((x) => x.rate > 0);
       if (!rows.length) return '';
-      const special = rows.filter((x) => x.special).length;
       const html = `<details class="rates"${open ? ' open' : ''}>
-        <summary><b>${esc(b.name)}</b><span class="muted small">${plural(rows.length, 'rate')}${special ? ` · ${special} special` : ''}</span></summary>
+        <summary><b>${esc(b.name)}</b><span class="muted small">${plural(rows.length, 'rate')}</span></summary>
         <table>${rows
-          .map((x) => `<tr><td>${esc(x.p.pack)}</td><td class="num"><b>${rs(x.rate)}</b>${x.special ? ' <span class="tag special">Special</span>' : ''}</td></tr>`)
+          .map((x) => `<tr><td>${esc(x.p.pack)}</td><td class="num"><b>${rs(x.rate)}</b></td></tr>`)
           .join('')}</table>
       </details>`;
       open = false;
@@ -145,7 +145,7 @@ VIEWS.shop = async (parts) => {
         refresh();
       }),
     delCustomer: (el) =>
-      askDelete(`Delete ${el.dataset.name}?`, 'All its orders, money received, calls and special rates are deleted with it.', async () => {
+      askDelete(`Delete ${el.dataset.name}?`, 'All its orders, money received, calls and rates are deleted with it.', async () => {
         await api('POST', `/customers/${id}/delete`);
         location.replace('#/shops');
       }),
@@ -162,8 +162,9 @@ VIEWS.shop = async (parts) => {
   const attrs = `data-id="${c.id}" data-name="${esc(c.name)}"`;
 
   let h = `<h2>${esc(c.name)}</h2>
-    <p class="muted">${[TYPE_NAME[c.type], c.owner, c.route, c.address].filter(Boolean).map(esc).join(' · ')}</p>
+    <p class="muted">${[TYPE_NAME[c.type], c.owner, c.route].filter(Boolean).map(esc).join(' · ')}</p>
     <div class="btns">${tel(c.mobile)}</div>
+    ${c.address ? `<div class="btns">${mapLink(c.address, 'btn light')}</div>` : ''}
     <div class="banner ${c.balance > 0 ? 'bad' : 'ok'}">
       <div><div class="small">Balance to collect</div><div class="balance">${rs(c.balance)}</div></div>
       <button class="btn" data-act="pay" ${attrs} data-balance="${c.balance}">Receive money</button>
@@ -272,7 +273,7 @@ VIEWS.shopform = async (parts, query) => {
     <label class="f" for="f-owner">${shop ? 'Owner name' : 'Contact person (if any)'}</label><input id="f-owner" value="${esc(c.owner)}">
     <label class="f" for="f-mobile">Mobile number</label><input id="f-mobile" type="tel" inputmode="numeric" maxlength="10" value="${esc(c.mobile)}" data-input="digits" required>
     ${routeField}
-    <label class="f" for="f-address">Address / area</label><textarea id="f-address">${esc(c.address)}</textarea>
+    <label class="f" for="f-address">Address / area, or a Google Maps link</label><textarea id="f-address" placeholder="Type the address, or paste the link from Google Maps (Share → Copy link)">${esc(c.address)}</textarea>
     ${
       isStaff()
         ? `<label class="f" for="f-balance">Old balance from the book (₹)</label><input id="f-balance" type="number" inputmode="decimal" value="${esc(c.opening_balance ?? 0)}">

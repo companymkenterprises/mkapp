@@ -128,6 +128,8 @@ VIEWS.staff = async () => {
   });
   list = (await api('GET', '/users')).list;
   const routeName = (id) => S.boot.routes.find((r) => r.id === id)?.name;
+  const routeNames = (ids) => (hasAllRoutes(ids.filter(routeName).length) ? 'All routes' : ids.map(routeName).filter(Boolean).map(esc).join(', '));
+  const sunday = isSunday(S.boot.today);
   return `${isAdmin() ? '<div class="btns"><button class="btn" data-act="editUser">+ New staff</button></div>' : ''}
     ${searchBox('Search name, mobile or route')}
     ${quickChips([['', 'All'], ['executive', 'Executives'], ['manager', 'Managers'], ['admin', 'Admin'], ['blocked', 'Blocked'], ['left', 'Left us']])}
@@ -135,13 +137,13 @@ VIEWS.staff = async () => {
       .map(
         (u) => `<div class="card" data-item data-k="${u.left_on ? 'left' : u.role + (u.active ? '' : '|blocked')}">
           <div class="row"><b class="grow">${esc(u.name)}</b>
-            ${u.left_on ? `<span class="tag cancelled">Ex ${ROLE_NAME[u.role].toLowerCase()}</span>` : !u.active ? '<span class="tag cancelled">Blocked</span>' : u.role === 'admin' ? '' : `<span class="tag ${u.attendance || 'pending'}">${ATT[u.attendance] || 'Not marked'}</span>`}</div>
+            ${u.left_on ? `<span class="tag cancelled">Ex ${ROLE_NAME[u.role].toLowerCase()}</span>` : !u.active ? '<span class="tag cancelled">Blocked</span>' : u.role === 'admin' ? '' : !u.attendance && sunday ? '<span class="tag present">Sunday off</span>' : `<span class="tag ${u.attendance || 'pending'}">${ATT[u.attendance] || 'Not marked'}</span>`}</div>
           <div class="muted">${ROLE_NAME[u.role]} · ${tel(u.mobile, '')}</div>
           ${u.email ? `<div class="muted small">${esc(u.email)}</div>` : ''}
           ${u.joined_on || u.hired_from || u.left_on ? `<div class="muted small">${esc(dots(u.joined_on ? 'Joined ' + fmtDate(u.joined_on) : '', u.hired_from ? 'from ' + u.hired_from : '', u.left_on ? 'left on ' + fmtDate(u.left_on) : ''))}</div>` : ''}
-          ${isAdmin() && u.role !== 'admin' ? `<div class="muted small">${u.salary ? 'Salary ' + rs(u.salary) + ' a month' : '<span class="red">Salary not set</span>'}</div>` : ''}
-          ${u.role === 'executive' ? `<div class="muted">Routes: ${u.route_ids.map(routeName).filter(Boolean).map(esc).join(', ') || '<span class="red">none given</span>'}</div>` : ''}
-          ${u.role === 'manager' && u.route_ids.length ? `<div class="muted">Routes: ${u.route_ids.map(routeName).filter(Boolean).map(esc).join(', ')}</div>` : ''}
+          ${isAdmin() && u.role !== 'admin' && u.salary ? `<div class="muted small">Salary ${rs(u.salary)} a month</div>` : ''}
+          ${u.role === 'executive' ? `<div class="muted">Routes: ${routeNames(u.route_ids) || '<span class="red">none given</span>'}</div>` : ''}
+          ${u.role === 'manager' && u.route_ids.length ? `<div class="muted">Routes: ${routeNames(u.route_ids)}</div>` : ''}
           <div class="btns">
             ${isAdmin() ? `<button class="btn light sm" data-act="editUser" data-id="${u.id}">Edit</button>` : u.role === 'executive' ? `<button class="btn light sm" data-act="editRoutes" data-id="${u.id}">Change routes</button>` : ''}
             <a class="btn light sm" href="#/orders?tab=history&user=${u.id}">Orders</a>
@@ -156,6 +158,7 @@ VIEWS.staff = async () => {
 const monthName = (m) => `${MONTHS[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
 const pendingText = (p) =>
   !p.salary && !p.earned && !p.paid ? '<span class="muted">Salary not set</span>' : p.pending < 0 ? `<b>Paid in advance ${rs(-p.pending)}</b>` : p.pending > 0 ? `<b class="red">Salary pending ${rs(p.pending)}</b>` : '<b>✓ Salary fully paid</b>';
+const teamRoutes = (p) => (hasAllRoutes(p.route_count) ? 'All routes' : p.routes);
 const exTag = (p) => (p.left_on ? `<span class="tag cancelled">Ex ${ROLE_NAME[p.role].toLowerCase()}</span>` : '');
 
 VIEWS.team = async (parts) => {
@@ -171,7 +174,7 @@ VIEWS.team = async (parts) => {
       .map(
         (p) => `<a class="card" href="#/team/${p.id}" data-item data-k="${p.left_on ? 'left' : p.role}${p.pending > 0 ? '|pending' : ''}">
           <div class="row"><b class="grow">${esc(p.name)}</b>${exTag(p)}</div>
-          <div class="muted">${esc(dots(ROLE_NAME[p.role], p.routes, 'joined ' + fmtDate(p.since), p.left_on ? 'left ' + fmtDate(p.left_on) : ''))}</div>
+          <div class="muted">${esc(dots(ROLE_NAME[p.role], teamRoutes(p), 'joined ' + fmtDate(p.since), p.left_on ? 'left ' + fmtDate(p.left_on) : ''))}</div>
           <div class="small">${esc(dots(plural(p.taken_count, 'order') + ' taken', plural(p.delivered_count, 'delivery').replace('deliverys', 'deliveries'), 'sales ' + rs(p.sales), 'collected ' + rs(p.collected)))}</div>
           <div class="small">${esc(dots(p.salary ? 'Salary ' + rs(p.salary) : '', 'paid ' + rs(p.paid), p.ot_hours ? `overtime ${num(p.ot_hours)} h` : ''))}</div>
           <div>${pendingText(p)}</div>
@@ -221,7 +224,7 @@ async function teamMember(id) {
   const m = d.thisMonth;
   const work = (x) => `<td class="num">${x.taken_count}</td><td class="num">${x.delivered_count}</td><td class="num">${rs(x.sales)}</td><td class="num">${rs(x.collected)}</td>`;
   return `<div class="row"><h2 class="grow">${esc(p.name)}</h2>${exTag(p)}</div>
-    <p class="muted">${esc(dots(ROLE_NAME[p.role], p.routes, p.hired_from ? 'from ' + p.hired_from : ''))}<br>
+    <p class="muted">${esc(dots(ROLE_NAME[p.role], teamRoutes(p), p.hired_from ? 'from ' + p.hired_from : ''))}<br>
       Joined ${fmtDate(p.since)}${p.left_on ? ' · left ' + fmtDate(p.left_on) : ''}</p>
     <div class="btns">${tel(p.mobile)}<a class="btn light" href="#/orders?tab=history&user=${p.id}">Orders</a></div>
 
@@ -288,6 +291,7 @@ VIEWS.attendance = async (parts, query) => {
   });
   d = await api('GET', '/attendance' + (query.date ? '?date=' + encodeURIComponent(query.date) : ''));
   return `<div class="filters"><input type="date" data-change="date" value="${d.date}" max="${d.today}" aria-label="Date"></div>
+    ${isSunday(d.date) ? '<div class="banner ok">Sunday is a paid weekly off. Nobody needs to be marked; mark only someone who worked (for overtime).</div>' : ''}
     ${
       d.list.length
         ? searchBox('Search name') +
@@ -392,7 +396,7 @@ VIEWS.products = async () => {
     },
   });
   await loadBoot();
-  return `<p class="muted">Normal rate is used for every customer that has no special rate. Special rates are set inside each customer.</p>
+  return `<p class="muted">Normal rate is used for every customer that has no rate of its own. A customer's own rates are set inside that customer.</p>
     <div class="btns"><button class="btn light" data-act="newBrand">+ New brand</button><button class="btn light" data-act="newPack">+ New box type</button></div>
     ${S.boot.brands
       .map(

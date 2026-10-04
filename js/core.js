@@ -58,6 +58,10 @@ const addDaysStr = (d, n) => {
   return t.toISOString().slice(0, 10);
 };
 const dayLabel = (d) => (d === S.boot.today ? 'Today' : d === addDaysStr(S.boot.today, 1) ? 'Tomorrow' : fmtDate(d));
+// Sunday is a paid weekly off: nobody is asked to mark attendance.
+const isSunday = (d) => new Date(d + 'T00:00:00Z').getUTCDay() === 0;
+// Someone who has every route shows "All routes" instead of the long list of names.
+const hasAllRoutes = (count) => S.boot.routes.length > 1 && count >= S.boot.routes.length;
 const isStaff = () => S.user.role !== 'executive';
 const isAdmin = () => S.user.role === 'admin';
 const ROLE_NAME = { admin: 'Admin', manager: 'Manager', executive: 'Executive' };
@@ -66,6 +70,16 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // Only a shop needs a route. A direct customer without one shows nothing.
 const routeText = (route, type) => route || (type === 'customer' ? '' : 'No route yet');
 const dots = (...parts) => parts.filter(Boolean).join(' · ');
+// An address is a Google Maps link (pasted from "Share" in Google Maps), plain text, or both. Tapping it opens Google Maps:
+// the pasted link itself, or a search for the typed address.
+const mapLink = (address, cls = '') => {
+  const all = String(address || '').trim();
+  if (!all) return '';
+  const url = (all.match(/https?:\/\/\S+/) || [])[0];
+  const text = all.replace(/https?:\/\/\S+/g, '').trim();
+  const href = url || 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(all);
+  return `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener">${icon('route', cls ? 18 : 14)} ${esc(text || 'Open in Google Maps')}</a>`;
+};
 const options = (list, selected, blank) =>
   (blank ? `<option value="">${esc(blank)}</option>` : '') +
   list.map((o) => `<option value="${esc(o.id)}"${String(o.id) === String(selected ?? '') ? ' selected' : ''}>${esc(o.name)}</option>`).join('');
