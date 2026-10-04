@@ -780,7 +780,13 @@ VIEWS.alerts = async () => {
 // ---------- more ----------
 VIEWS.more = async () => {
   const item = (href, ico, label) => `<a href="${href}"><span class="ico">${icon(ico)}</span>${label}</a>`;
-  let h = `<p class="muted">${esc(S.user.name)} · ${ROLE_NAME[S.user.role]} · ${esc(S.user.mobile)}</p><div class="menu">`;
+  let h = `<p class="muted">${esc(S.user.name)} · ${ROLE_NAME[S.user.role]} · ${esc(S.user.mobile)}</p>`;
+  // An executive sees no staff list, only the own manager to call.
+  if (!isStaff()) {
+    const managers = (await api('GET', '/managers')).list;
+    h += managers.map((m) => `<div class="card row"><div class="grow"><div class="muted small">My manager</div><b>${esc(m.name)}</b></div>${tel(m.mobile)}</div>`).join('');
+  }
+  h += '<div class="menu">';
   if (isStaff()) {
     h += item('#/calls', 'phone', 'Customers to call') + item('#/sales', 'chart', isAdmin() ? 'Sales and earnings' : 'Sales') + item('#/staff', 'users', 'Staff') + item('#/team', 'wallet', 'Team work and salary') + item('#/attendance', 'calendar', 'Attendance');
     h += item('#/stock?tab=bottles', 'bottle', 'Bottles') + item('#/routes', 'route', 'Routes') + item('#/leads', 'inbox', 'IndiaMART enquiries') + item('#/lost', 'lost', 'Customers we lost');
