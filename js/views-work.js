@@ -9,12 +9,12 @@ VIEWS.home = async () => {
   S.callsDue = d.callsDue;
   updateBadges();
 
-  let h = `<h2>Hello, ${esc(S.user.name)}</h2><p class="muted">${fmtDate(d.today)} · ${ROLE_NAME[S.user.role]}</p>`;
-  if (!isAdmin()) {
+  let h = `<h2>Hello, ${esc(S.user.name)}</h2><p class="muted">${fmtDate(d.today)} · ${roleNames(S.user)}</p>`;
+  if (worksAsStaff()) {
     // Nobody marks the own attendance; the manager marks it for everyone on the Attendance page.
     const mark = { present: 'Present', half: 'Half day', absent: 'Absent', leave: 'Leave' }[d.attendance?.status];
     h += mark
-      ? `<div class="banner ${d.attendance.status === 'absent' ? 'bad' : 'ok'}">Your attendance today: ${mark}</div>`
+      ? `<div class="banner ${d.attendance.status === 'absent' ? 'bad' : 'ok'}">Your attendance today: ${mark}${d.attendance.in_time ? `, came in at ${esc(d.attendance.in_time)}` : ''}</div>`
       : isSunday(d.today)
       ? '<div class="banner ok">Sunday – paid weekly off</div>'
       : `<div class="banner warn"><span>Your attendance is not marked yet. The manager marks it.</span>${isStaff() ? '<a class="btn" href="#/attendance">Mark attendance</a>' : ''}</div>`;
@@ -22,6 +22,14 @@ VIEWS.home = async () => {
   h += d.lowMaterials.map((m) => `<a class="banner bad" href="#/stock?tab=bottles"><span>${icon('warn', 20)} Only ${num(m.stock)} ${esc(m.name)} left. Order more.</span></a>`).join('');
 
   const lateText = d.late ? `${d.late} late` : '';
+  // Only factory staff: no customers, orders or sales.
+  if (onlyFactory()) {
+    return `${h}<div class="tiles">
+      ${tile('#/stock', num(d.madeToday), 'Boxes made today')}
+      ${tile('#/money', rs(d.money), 'Company money with me', d.money > 0 ? 'warn' : '')}
+    </div>
+    <div class="btns"><a class="btn big" href="#/stock">Open stock</a></div>`;
+  }
   if (!isStaff()) {
     h += `<div class="tiles">
       ${tile('#/calls', d.callsDue, 'Customers to call today', d.callsDue ? 'warn' : '')}
@@ -167,7 +175,7 @@ function orderCard(o, today, showCustomer = true) {
     </div>
     ${showCustomer ? `<div class="muted">${dots(esc(routeText(o.route, o.customer_type)), tel(o.mobile, ''))}</div>` : ''}
     ${showCustomer && o.address && o.status === 'pending' ? `<div class="muted small">${mapLink(o.address)}</div>` : ''}
-    <ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} ${qtyText(i.qty, i.pieces)}</span><span>${rs(i.amount)}</span></li>`).join('')}
+    <ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} ${qtyText(i.qty, i.pieces, i.unit)}</span><span>${rs(i.amount)}</span></li>`).join('')}
       <li><b>Total</b><b>${rs(o.total)}</b></li></ul>
     ${o.note ? `<div class="muted">Note: ${esc(o.note)}</div>` : ''}
     <div class="muted small">Order taken by <b>${esc(o.taken_by_name)}</b> on ${fmtDate(o.taken_date)}${showCustomer ? ` · #${o.id}` : ''}</div>
@@ -409,7 +417,7 @@ VIEWS.order = async (parts) => {
             }</div>
             ${
               rate && p.pieces > 1
-                ? `<div class="row" style="margin-top:8px"><label class="grow muted small" for="loose-${p.id}">Loose pieces (${rs(Math.round((rate / p.pieces) * 100) / 100)} each)</label>
+                ? `<div class="row" style="margin-top:8px"><label class="grow muted small" for="loose-${p.id}">Loose ${looseWord(p.unit)}s (${rs(Math.round((rate / p.pieces) * 100) / 100)} each)</label>
                    <input id="loose-${p.id}" style="width:96px" type="number" inputmode="numeric" min="0" max="${p.pieces - 1}" data-input="loose" data-id="${p.id}" value="${loose[p.id] || ''}" placeholder="0"></div>`
                 : ''
             }
@@ -421,7 +429,7 @@ VIEWS.order = async (parts) => {
     const l = lines();
     if (!l.length) return '<p class="muted">Press + to add boxes.</p>';
     const total = l.reduce((s, x) => s + x.amount, 0);
-    return `<ul class="items">${l.map((x) => `<li><span>${esc(x.p.brand)} ${esc(x.p.pack)} ${qtyText(x.qty, x.pieces)}</span><span>${rs(x.amount)}</span></li>`).join('')}
+    return `<ul class="items">${l.map((x) => `<li><span>${esc(x.p.brand)} ${esc(x.p.pack)} ${qtyText(x.qty, x.pieces, x.p.unit)}</span><span>${rs(x.amount)}</span></li>`).join('')}
       <li><b>Order total</b><b>${rs(total)}</b></li>
       <li><span>Balance after delivery</span><span class="red">${rs(d.customer.balance + total)}</span></li></ul>`;
   };
@@ -489,8 +497,8 @@ VIEWS.order = async (parts) => {
       <button class="chip" data-act="chip" data-target="o-date" data-val="${addDaysStr(t, 2)}">After 2 days</button>
     </div>
     <input id="o-date" type="date" min="${t}" value="${t}">
-    <label class="f" for="o-next">Call this customer again after (days)</label>
-    <input id="o-next" type="number" inputmode="numeric" min="1" max="90" value="${c.call_every_days}">
+    <label class="f" for="o-next">Call this customer again after (days). 0 = no call</label>
+    <input id="o-next" type="number" inputmode="numeric" min="0" max="90" value="${c.call_every_days}">
     </div>
     <label class="f" for="o-note">Note (if any)</label>
     <textarea id="o-note"></textarea>
@@ -509,7 +517,7 @@ VIEWS.bill = async (parts, query) => {
   const message = [
     `*${S.business}*`,
     `Bill no ${o.id} · ${fmtDate(o.taken_date)}`,
-    ...o.items.map((i) => `${i.brand} ${i.pack} ${qtyText(i.qty, i.pieces)} = ${rs(i.amount)}`),
+    ...o.items.map((i) => `${i.brand} ${i.pack} ${qtyText(i.qty, i.pieces, i.unit)} = ${rs(i.amount)}`),
     `*Total: ${rs(o.total)}*`,
     o.status === 'pending' && o.balance ? `Old balance: ${rs(o.balance)}\nTotal to pay: ${rs(o.balance + o.total)}` : '',
     o.status === 'delivered' ? `Balance to pay now: ${rs(o.balance)}` : '',
@@ -529,7 +537,7 @@ VIEWS.bill = async (parts, query) => {
   // Opens the WhatsApp chat of this customer's number with the bill typed in; the staff member presses send.
   // WhatsApp takes no file this way, so the message carries a link that opens the bill PDF.
   ACT.sendBill = () => {
-    window.open(`https://wa.me/91${encodeURIComponent(o.mobile)}?text=${encodeURIComponent(`${message}\n\nBill (PDF): ${pdfUrl}`)}`, '_blank', 'noopener');
+    window.open(`https://wa.me/${o.mobile ? '91' + encodeURIComponent(o.mobile) : ''}?text=${encodeURIComponent(`${message}\n\nBill (PDF): ${pdfUrl}`)}`, '_blank', 'noopener');
   };
   // The PDF itself, through the phone's share list (WhatsApp, then choose the customer).
   ACT.shareBill = async () => {
@@ -555,12 +563,12 @@ VIEWS.bill = async (parts, query) => {
   return `${query.new ? `<div class="banner ok">✓ Order #${o.id} saved</div>` : ''}
     <h2>${esc(o.customer)}</h2>
     <p class="muted">${dots(`Bill no ${o.id}`, fmtDate(o.taken_date), tel(o.mobile, ''))}</p>
-    <div class="card"><ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} ${qtyText(i.qty, i.pieces)}</span><span>${rs(i.amount)}</span></li>`).join('')}
+    <div class="card"><ul class="items">${o.items.map((i) => `<li><span>${esc(i.brand)} ${esc(i.pack)} ${qtyText(i.qty, i.pieces, i.unit)}</span><span>${rs(i.amount)}</span></li>`).join('')}
       <li><b>Total</b><b>${rs(o.total)}</b></li>
       ${o.status === 'pending' && o.balance ? `<li><span>Old balance</span><span>${rs(o.balance)}</span></li><li><b>Total to pay</b><b class="red">${rs(o.balance + o.total)}</b></li>` : ''}
       ${o.status === 'delivered' ? `<li><b>Balance to pay now</b><b class="red">${rs(o.balance)}</b></li>` : ''}</ul></div>
     <div class="btns"><button class="btn big" data-act="sendBill">${icon('send', 20)} Send bill on WhatsApp</button></div>
-    <p class="muted small">Opens WhatsApp on ${esc(o.mobile)} with the bill written and a link to the PDF. Press send there.</p>
+    <p class="muted small">${o.mobile ? `Opens WhatsApp on ${esc(o.mobile)}` : 'No mobile number is saved for this customer: WhatsApp opens and you choose who gets it,'} with the bill written and a link to the PDF. Press send there.</p>
     <div class="btns">
       <button class="btn light" data-act="shareBill">Share PDF file</button>
       <a class="btn light" href="${pdfUrl}" target="_blank" rel="noopener">Open bill (PDF)</a>
@@ -652,7 +660,7 @@ VIEWS.returns = async (parts, query) => {
   const reasons = [...new Set(d.list.map((r) => r.reason))];
   return `${h}<div class="banner warn"><div><div class="small">Returned this month</div><div class="balance">${plural(d.pieces, 'piece')} · ${rs(d.total)}</div></div></div>
     <div class="table-wrap"><table><tr><th>Product</th><th class="num">Pieces</th><th class="num">Value</th></tr>
-      ${d.products.map((p) => `<tr><td>${esc(p.brand)} ${esc(p.pack)}</td><td class="num">${num(p.pieces)}</td><td class="num">${rs(p.amount)}</td></tr>`).join('')}</table></div>
+      ${d.products.map((p) => `<tr><td>${esc(p.brand)} ${esc(p.pack)}</td><td class="num">${num(p.pieces)}${p.unit === 'Bag' ? ' packets' : ''}</td><td class="num">${rs(p.amount)}</td></tr>`).join('')}</table></div>
     <h3>All returns</h3>
     ${searchBox('Search customer, product, reason or person')}
     ${quickChips([['', 'All'], ...reasons.map((r) => [r, r])])}
@@ -674,9 +682,9 @@ async function staffMoney() {
     ${quickChips([['', 'All'], ['has', 'Has company money'], ['executive', 'Executives'], ['manager', 'Managers'], ['left', 'Left us']])}
     <div id="quick-list">${d.list
       .map(
-        (p) => `<a class="card" href="#/money/${p.id}" data-item data-k="${p.left_on ? 'left' : p.role}${p.should > 0 ? '|has' : ''}">
+        (p) => `<a class="card" href="#/money/${p.id}" data-item data-k="${p.left_on ? 'left' : rolesOf(p).join('|')}${p.should > 0 ? '|has' : ''}">
           <div class="row"><b class="grow">${esc(p.name)}</b><b class="${p.should > 0 ? 'red' : ''}">${rs(p.should)}</b></div>
-          <div class="muted small">${esc(dots(p.left_on ? 'Ex ' + ROLE_NAME[p.role].toLowerCase() : ROLE_NAME[p.role], p.checked ? 'balance checked ' + fmtDate(p.checked) : 'balance never checked'))}</div>
+          <div class="muted small">${esc(dots(p.left_on ? 'Ex ' + ROLE_NAME[p.role].toLowerCase() : roleNames(p), p.checked ? 'balance checked ' + fmtDate(p.checked) : 'balance never checked'))}</div>
           <div class="small">${esc(dots('Collected ' + rs(p.collected), `Expenses ${rs(p.spent)} (${p.expense_count})`, p.returned ? 'Gave back ' + rs(p.returned) : '', p.given ? 'Given ' + rs(p.given) : ''))}</div>
         </a>`
       )
@@ -827,7 +835,7 @@ VIEWS.alerts = async () => {
 // ---------- more ----------
 VIEWS.more = async () => {
   const item = (href, ico, label) => `<a href="${href}"><span class="ico">${icon(ico)}</span>${label}</a>`;
-  let h = `<p class="muted">${esc(S.user.name)} · ${ROLE_NAME[S.user.role]} · ${esc(S.user.mobile)}</p>`;
+  let h = `<p class="muted">${esc(S.user.name)} · ${roleNames(S.user)} · ${esc(S.user.mobile)}</p>`;
   // An executive sees no staff list, only the own manager to call.
   if (!isStaff()) {
     const managers = (await api('GET', '/managers')).list;
@@ -842,7 +850,7 @@ VIEWS.more = async () => {
     h += item('#/stock', 'box', 'Stock') + item('#/stock?tab=bottles', 'bottle', 'Bottles');
   }
   // Managers and executives enter and see their expenses inside "Company money and expenses"; the admin has the page of all expenses.
-  h += (isAdmin() ? item('#/money', 'wallet', 'Company money with staff') + item('#/expenses', 'wallet', 'Expenses') : item('#/money', 'wallet', 'Company money and expenses')) + item('#/returns', 'box', 'Returned stock') + item('#/alerts', 'bell', 'Alerts') + item('#/pin', 'lock', 'Change PIN');
+  h += (isAdmin() ? item('#/money', 'wallet', 'Company money with staff') + item('#/expenses', 'wallet', 'Expenses') : item('#/money', 'wallet', 'Company money and expenses')) + (onlyFactory() ? '' : item('#/returns', 'box', 'Returned stock')) + item('#/alerts', 'bell', 'Alerts') + item('#/pin', 'lock', 'Change PIN');
   h += `<button data-act="logout"><span class="ico">${icon('power')}</span>Logout</button></div>`;
   return h;
 };

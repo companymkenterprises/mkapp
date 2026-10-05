@@ -43,7 +43,7 @@ const ICONS = {
 const icon = (name, size = 22) =>
   `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 // A tap-to-call link; cls 'btn' gives the big button, '' a small link inside text.
-const tel = (mobile, cls = 'btn') => `<a class="${cls}" href="tel:${esc(mobile)}">${icon('phone', cls ? 18 : 14)} ${esc(mobile)}</a>`;
+const tel = (mobile, cls = 'btn') => !mobile ? '' : `<a class="${cls}" href="tel:${esc(mobile)}">${icon('phone', cls ? 18 : 14)} ${esc(mobile)}</a>`;
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtDate = (d) => {
@@ -62,18 +62,30 @@ const dayLabel = (d) => (d === S.boot.today ? 'Today' : d === addDaysStr(S.boot.
 const isSunday = (d) => new Date(d + 'T00:00:00Z').getUTCDay() === 0;
 // Someone who has every route shows "All routes" instead of the long list of names.
 const hasAllRoutes = (count) => S.boot.routes.length > 1 && count >= S.boot.routes.length;
-const isStaff = () => S.user.role !== 'executive';
+// One person can have several roles. S.user.role is the highest one; S.user.roles has all of them ("admin,executive").
+const isStaff = () => ['admin', 'manager'].includes(S.user.role);
 const isAdmin = () => S.user.role === 'admin';
-const ROLE_NAME = { admin: 'Admin', manager: 'Manager', executive: 'Executive' };
+const ROLE_NAME = { admin: 'Admin', manager: 'Manager', executive: 'Executive', factory: 'Factory staff' };
+const ROLE_LIST = ['admin', 'manager', 'executive', 'factory'];
+const rolesOf = (u) => String(u.roles || u.role || '').split(',').filter(Boolean);
+const roleNames = (u) => rolesOf(u).map((r) => ROLE_NAME[r]).join(' + ');
+// Only factory staff: no customers, orders or sales.
+const onlyFactory = () => S.user.role === 'factory';
+// Boxes made, stock count and bottles: the manager, the admin and factory staff.
+const canMake = () => isStaff() || rolesOf(S.user).includes('factory');
+// Someone who is only admin (the owner) has no attendance or salary.
+const worksAsStaff = () => rolesOf(S.user).join() !== 'admin';
 const TYPE_NAME = { shop: 'Shop', customer: 'Customer' };
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // Only a shop needs a route. A direct customer without one shows nothing.
 const routeText = (route, type) => route || (type === 'customer' ? '' : 'No route yet');
 const dots = (...parts) => parts.filter(Boolean).join(' · ');
-// How many pieces one box, bag or drum holds, said plainly: "1 box = 30 pieces". A drum is one piece: "1 drum".
-const packPieces = (p) => (p.pieces > 1 ? `1 ${String(p.unit).toLowerCase()} = ${num(p.pieces)} pieces` : `1 ${String(p.unit).toLowerCase()}`);
+// A bag is opened by the packet, a box by the piece.
+const looseWord = (unit) => (unit === 'Bag' ? 'packet' : 'piece');
+// How many pieces one box, bag or drum holds, said plainly: "1 box = 30 pieces", "1 bag = 50 packets". A drum is one piece: "1 drum".
+const packPieces = (p) => (p.pieces > 1 ? `1 ${String(p.unit).toLowerCase()} = ${num(p.pieces)} ${looseWord(p.unit)}s` : `1 ${String(p.unit).toLowerCase()}`);
 // How much of a product: "× 2" for full boxes, "× 2 + 5 pieces" with loose pieces, "5 pieces" for loose pieces only.
-const qtyText = (qty, pieces) => (pieces ? `${qty ? `× ${qty} + ` : ''}${plural(pieces, 'piece')}` : `× ${qty}`);
+const qtyText = (qty, pieces, unit) => (pieces ? `${qty ? `× ${qty} + ` : ''}${plural(pieces, looseWord(unit))}` : `× ${qty}`);
 // An address is a Google Maps link (pasted from "Share" in Google Maps), plain text, or both. Tapping it opens Google Maps:
 // the pasted link itself, or a search for the typed address.
 const mapLink = (address, cls = '') => {
@@ -233,6 +245,9 @@ const NAV = {
   manager: [['home', 'home', 'Home'], ['orders', 'orders', 'Orders'], ['shops', 'store', 'Customers'], ['stock', 'box', 'Stock'], ['more', 'menu', 'More']],
 };
 NAV.admin = NAV.manager;
+NAV.factory = [['home', 'home', 'Home'], ['stock', 'box', 'Stock'], ['more', 'menu', 'More']];
+// The pages someone who is only factory staff can open.
+const FACTORY_PAGES = ['home', 'stock', 'count', 'more', 'alerts', 'money', 'pin'];
 const PARENT = { order: 'orders', bill: 'orders', shop: 'shops', shopform: 'shops', rates: 'shops', count: 'stock' };
 const TITLES = {
   bill: 'Bill', leads: 'IndiaMART enquiries', expenses: 'Expenses',
@@ -268,7 +283,7 @@ async function render(keepScroll) {
   if (!S.user) return viewLogin();
 
   const { parts, query } = parseHash();
-  const name = VIEWS[parts[0]] ? parts[0] : 'home';
+  const name = VIEWS[parts[0]] && !(onlyFactory() && !FACTORY_PAGES.includes(parts[0])) ? parts[0] : 'home';
   const token = ++renderToken;
   ACT = {};
   closeSheet();
@@ -291,12 +306,13 @@ async function runAct(name, el, e) {
   if (!fn) return;
   const btn = el.tagName === 'BUTTON' ? el : null;
   try {
-    if (btn) btn.disabled = true; // stops double taps saving twice
+    // stops double taps saving twice, and shows at once that the tap was taken
+    if (btn) (btn.disabled = true), btn.classList.add('busy');
     await fn(el, e);
   } catch (err) {
     toast(err.message, true);
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) (btn.disabled = false), btn.classList.remove('busy');
   }
 }
 document.addEventListener('click', (e) => {

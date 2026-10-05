@@ -119,12 +119,12 @@ VIEWS.shop = async (parts) => {
       if (!prods.length) throw new Error('No rates are set for this customer, so the value of a return cannot be counted');
       const row = () => `<div class="row ret-row" style="gap:8px;margin-bottom:8px">
         <select class="grow" aria-label="Product">${options(prods.map((p) => ({ id: p.id, name: `${p.brand} ${p.pack}` })), '', 'Select product')}</select>
-        <input style="width:96px" type="number" inputmode="numeric" min="1" placeholder="Pieces" aria-label="Pieces"></div>`;
+        <input style="width:96px" type="number" inputmode="numeric" min="1" placeholder="How many" aria-label="How many"></div>`;
       ACT.moreReturn = () => $('#ret-rows').insertAdjacentHTML('beforeend', row());
       sheet(`<h3>Stock returned by ${esc(d.customer.name)}</h3>
         <label class="f">Why is it returned?</label>
         <div class="chips" id="ret-reason">${S.boot.returnReasons.map((t) => `<button class="chip" data-act="chip" data-val="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-        <label class="f">Which product, how many pieces (not boxes)</label>
+        <label class="f">Which product, how many pieces (not boxes). For a bag: how many packets</label>
         <div id="ret-rows">${row()}</div>
         <div class="btns"><button class="btn light sm" data-act="moreReturn">+ Another product</button></div>
         <label class="f" for="ret-note">Note (if any)</label><input id="ret-note" type="text" placeholder="Example: batch of last week, lids were loose">
@@ -163,7 +163,8 @@ VIEWS.shop = async (parts) => {
 
   let h = `<h2>${esc(c.name)}</h2>
     <p class="muted">${[TYPE_NAME[c.type], c.owner, c.route].filter(Boolean).map(esc).join(' · ')}</p>
-    <div class="btns">${tel(c.mobile)}</div>
+    ${c.mobile ? `<div class="btns">${tel(c.mobile)}</div>` : '<p class="muted small">No mobile number saved</p>'}
+    ${c.gst ? `<p class="muted">GST no: <b>${esc(c.gst)}</b></p>` : ''}
     ${c.address ? `<div class="btns">${mapLink(c.address, 'btn light')}</div>` : ''}
     <div class="banner ${c.balance > 0 ? 'bad' : 'ok'}">
       <div><div class="small">Balance to collect</div><div class="balance">${rs(c.balance)}</div></div>
@@ -186,7 +187,7 @@ VIEWS.shop = async (parts) => {
         <button class="btn light sm" data-act="noanswer" ${attrs}>No answer</button>
         <button class="btn danger sm" data-act="lost" ${attrs}>Not needed</button>
       </div>
-      <p class="muted">Next call: ${c.next_call_date ? dayLabel(c.next_call_date) : 'Today'}</p>`;
+      <p class="muted">Next call: ${c.next_call_date ? dayLabel(c.next_call_date) : c.call_every_days === 0 ? 'No regular calls' : 'Today'}</p>`;
   }
 
   h += `<h3>Rates</h3><p class="muted">Price of one box or bag for this customer.</p>${ratesHtml(d.rates)}`;
@@ -243,7 +244,7 @@ VIEWS.shopform = async (parts, query) => {
   const id = +parts[1] || 0;
   const newType = query.type === 'customer' ? 'customer' : 'shop';
   ACT.saveShop = async () => {
-    const body = { type: id ? $('#f-type').value : newType, name: $('#f-name').value, owner: $('#f-owner').value, mobile: $('#f-mobile').value, route_id: $('#f-route')?.value || '', address: $('#f-address').value };
+    const body = { type: id ? $('#f-type').value : newType, name: $('#f-name').value, owner: $('#f-owner').value, mobile: $('#f-mobile').value, route_id: $('#f-route')?.value || '', address: $('#f-address').value, gst: $('#f-gst').value };
     if (isStaff()) Object.assign(body, { opening_balance: $('#f-balance').value, call_every_days: $('#f-every').value });
     if (!id) Object.assign(body, { rates: typedRates(), lead_id: query.lead || '' });
     const r = id ? await api('PUT', `/customers/${id}`, body) : await api('POST', '/customers', body);
@@ -271,13 +272,14 @@ VIEWS.shopform = async (parts, query) => {
     ${id ? `<label class="f" for="f-type">Shop or customer</label><select id="f-type">${options([{ id: 'shop', name: 'Shop' }, { id: 'customer', name: 'Customer' }], c.type)}</select>` : ''}
     <label class="f" for="f-name">${shop ? 'Shop name' : 'Customer name'}</label><input id="f-name" value="${esc(c.name)}" required>
     <label class="f" for="f-owner">${shop ? 'Owner name' : 'Contact person (if any)'}</label><input id="f-owner" value="${esc(c.owner)}">
-    <label class="f" for="f-mobile">Mobile number</label><input id="f-mobile" type="tel" inputmode="numeric" maxlength="10" value="${esc(c.mobile)}" data-input="digits" required>
+    <label class="f" for="f-mobile">Mobile number (if any)</label><input id="f-mobile" type="tel" inputmode="numeric" maxlength="10" value="${esc(c.mobile)}" data-input="digits">
     ${routeField}
     <label class="f" for="f-address">Address / area, or a Google Maps link</label><textarea id="f-address" placeholder="Type the address, or paste the link from Google Maps (Share → Copy link)">${esc(c.address)}</textarea>
+    <label class="f" for="f-gst">GST number (if any)</label><input id="f-gst" maxlength="15" autocapitalize="characters" value="${esc(c.gst || '')}" placeholder="Printed on the bill">
     ${
       isStaff()
         ? `<label class="f" for="f-balance">Old balance from the book (₹)</label><input id="f-balance" type="number" inputmode="decimal" value="${esc(c.opening_balance ?? 0)}">
-           <label class="f" for="f-every">Call every (days)</label><input id="f-every" type="number" inputmode="numeric" min="1" max="90" value="${esc(c.call_every_days ?? 7)}">`
+           <label class="f" for="f-every">Call every (days). 0 = no regular calls</label><input id="f-every" type="number" inputmode="numeric" min="0" max="90" value="${esc(c.call_every_days ?? 7)}">`
         : ''
     }
     ${
@@ -329,7 +331,7 @@ VIEWS.stock = async (parts, query) => {
     for (const r of rows) {
       const p = productOf(r);
       const boxes = parseInt(r.boxes, 10) || 0;
-      if (p && p.material_id && boxes > 0) need.set(p.material_id, (need.get(p.material_id) || 0) + boxes * p.pieces);
+      if (p && p.material_id && boxes > 0) need.set(p.material_id, (need.get(p.material_id) || 0) + boxes * p.uses);
     }
     $('#made-need').innerHTML = [...need]
       .map(([id, n]) => {
@@ -464,7 +466,7 @@ VIEWS.stock = async (parts, query) => {
           <div class="balance ${m.low ? 'red' : ''}">${num(m.stock)}</div>
           <div class="muted small">Alert when ${num(m.low_at)} or less</div>
           <div class="btns">
-            ${isStaff() ? `<button class="btn sm" data-act="addBottles" data-id="${m.id}">+ New stock came</button><button class="btn light sm" data-act="countBottles" data-id="${m.id}">Count</button>` : ''}
+            ${canMake() ? `<button class="btn sm" data-act="addBottles" data-id="${m.id}">+ New stock came</button><button class="btn light sm" data-act="countBottles" data-id="${m.id}">Count</button>` : ''}
             <button class="btn light sm" data-act="history" data-id="${m.id}">History</button>
             ${isAdmin() ? `<button class="btn light sm" data-act="editBottle" data-id="${m.id}">Edit</button><button class="btn danger sm" data-act="delBottle" data-id="${m.id}" data-name="${esc(m.name)}">Delete</button>` : ''}
           </div>
@@ -478,7 +480,7 @@ VIEWS.stock = async (parts, query) => {
 
   const shown = query.all ? d.products : d.products.filter((p) => p.opening || p.made || p.sold || p.sold_pieces || p.closing || p.loose || p.pending || p.corrected);
   h += `<div class="filters"><input type="date" data-change="date" value="${d.date}" max="${d.today}" aria-label="Date"></div>`;
-  if (isStaff()) h += `<div class="btns"><button class="btn" data-act="made">${icon('plus', 18)} Boxes made</button><a class="btn light" href="#/count">Count stock</a></div>`;
+  if (canMake()) h += `<div class="btns"><button class="btn" data-act="made">${icon('plus', 18)} Boxes made</button><a class="btn light" href="#/count">Count stock</a></div>`;
   const tags = (p) => [p.made ? 'made' : '', p.sold || p.sold_pieces ? 'sold' : '', p.pending ? 'ordered' : '', p.closing > 0 ? 'stock' : ''].filter(Boolean).join('|');
   h += shown.length
     ? `${searchBox('Search brand or box type')}
@@ -488,8 +490,8 @@ VIEWS.stock = async (parts, query) => {
         ${shown
           .map(
             (p) => `<tr data-item data-k="${tags(p)}"><td>${esc(p.brand)}<div class="muted small">${esc(p.pack)}</div></td>
-              <td class="num">${num(p.opening)}</td><td class="num">${p.made ? '+' + num(p.made) : '0'}</td><td class="num">${p.sold ? '−' + num(p.sold) : '0'}${p.sold_pieces ? `<div class="muted small">−${num(p.sold_pieces)} pcs</div>` : ''}</td>
-              <td class="num"><b class="${p.closing < 0 ? 'red' : ''}">${num(p.closing)}</b>${p.loose ? `<div class="muted small">+ ${num(p.loose)} loose pcs</div>` : ''}${p.corrected ? `<div class="red small">${p.corrected > 0 ? '+' : ''}${p.corrected} in count</div>` : ''}</td>
+              <td class="num">${num(p.opening)}</td><td class="num">${p.made ? '+' + num(p.made) : '0'}</td><td class="num">${p.sold ? '−' + num(p.sold) : '0'}${p.sold_pieces ? `<div class="muted small">−${num(p.sold_pieces)} ${p.unit === 'Bag' ? 'packets' : 'pcs'}</div>` : ''}</td>
+              <td class="num"><b class="${p.closing < 0 ? 'red' : ''}">${num(p.closing)}</b>${p.loose ? `<div class="muted small">+ ${num(p.loose)} loose ${p.unit === 'Bag' ? 'packets' : 'pcs'}</div>` : ''}${p.corrected ? `<div class="red small">${p.corrected > 0 ? '+' : ''}${p.corrected} in count</div>` : ''}</td>
               <td class="num">${p.pending ? num(p.pending) : ''}</td></tr>`
           )
           .join('')}
@@ -499,7 +501,7 @@ VIEWS.stock = async (parts, query) => {
   if (!query.all && shown.length < d.products.length) h += '<div class="btns"><button class="btn light sm" data-act="showAll">Show all products</button></div>';
 
   // The entries behind the numbers of this day; the admin can delete a wrong one.
-  if (isStaff()) {
+  if (canMake()) {
     const entries = (await api('GET', '/stock/entries?date=' + encodeURIComponent(d.date))).list;
     if (entries.length) {
       const WHAT = { production: 'Boxes made', count: 'Count correction' };

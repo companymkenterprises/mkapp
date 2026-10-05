@@ -105,13 +105,19 @@ nav.bottom .badge { right: calc(50% - 26px); top: 6px; background: var(--red); c
   font: 600 15px system-ui; cursor: pointer; text-align: center;
   box-shadow: 0 1px 2px rgba(8, 22, 72, .3);
 }
-.btn:active { transform: translateY(1px); }
+.btn:active, .chip:active, .qty button:active, .tile:active, .menu a:active, .menu button:active, nav.bottom a:active, .icon-btn:active, a.card:active { transform: scale(.96); filter: brightness(.86); }
+/* A tap answers at once: no waiting for a double tap, no grey flash, and the tapped button shows that it is working. */
+a, button, label, input, select, summary { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+button, .btn, .chip, .tile, nav.bottom a { -webkit-user-select: none; user-select: none; }
+.busy { pointer-events: none; opacity: .75; }
+.busy::after { content: ""; flex: none; display: inline-block; width: 14px; height: 14px; margin-left: 6px; vertical-align: -2px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .btn:disabled { opacity: .55; }
 .btn.light { background: var(--card); color: var(--blue-dark); border-color: var(--field); box-shadow: none; }
 .btn.danger { background: var(--card); color: var(--red); border-color: #e5b5ae; box-shadow: none; }
 .btn.gold { background: linear-gradient(180deg, #f2c94c, var(--gold)); color: #1d1705; border-color: #b98a14; }
 .btn.big { width: 100%; min-height: 52px; font-size: 17px; }
-.btn.sm { min-height: 38px; padding: 4px 12px; font-size: 14px; border-radius: 10px; }
+.btn.sm { min-height: 44px; padding: 6px 14px; font-size: 14px; border-radius: 10px; }
 .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .btns .btn { flex: 1 1 auto; }
 .btns.top-action { margin: 0 0 12px; }
@@ -129,7 +135,7 @@ input.pin::placeholder { color: #c9c2b0; letter-spacing: .35em; font-weight: 400
 .check { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--line); font-size: 16px; }
 .check input { width: 22px; height: 22px; min-height: 0; flex: none; accent-color: var(--blue); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
-.chip { padding: 8px 14px; border-radius: 20px; border: 1px solid var(--field); background: var(--card); color: var(--ink); font: 15px system-ui; cursor: pointer; min-height: 40px; }
+.chip { padding: 8px 14px; border-radius: 20px; border: 1px solid var(--field); background: var(--card); color: var(--ink); font: 15px system-ui; cursor: pointer; min-height: 44px; }
 .chip.on { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
 .tabs { display: flex; gap: 6px; margin: 4px 0 10px; background: #ebe5d5; padding: 4px; border-radius: 14px; }
 .tabs a { flex: 1; text-align: center; padding: 9px 4px; border-radius: 10px; color: var(--muted); font-weight: 600; font-size: 15px; }
@@ -140,7 +146,7 @@ input.pin::placeholder { color: #c9c2b0; letter-spacing: .35em; font-weight: 400
 
 /* quantity stepper */
 .qty { display: flex; align-items: center; gap: 4px; }
-.qty button { width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--field); background: var(--card); font-size: 22px; color: var(--blue-dark); cursor: pointer; }
+.qty button { width: 46px; height: 46px; border-radius: 12px; border: 1px solid var(--field); background: var(--card); font-size: 22px; color: var(--blue-dark); cursor: pointer; }
 .qty input { width: 58px; min-height: 42px; padding: 4px; text-align: center; }
 .sticky-foot { position: sticky; bottom: calc(var(--nav-h) + 8px); background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px; box-shadow: 0 -2px 14px rgba(20, 27, 46, .12); margin-top: 12px; }
 
@@ -176,7 +182,7 @@ details.rates[open] summary { border-bottom: 1px solid var(--line); background: 
 .sheet-back { position: absolute; inset: 0; background: rgba(6, 14, 44, .55); }
 .sheet-box { position: absolute; left: 0; right: 0; bottom: 0; max-height: 92vh; overflow-y: auto; background: var(--card); border-radius: 20px 20px 0 0; border-top: 3px solid var(--gold); padding: 18px 16px calc(20px + env(safe-area-inset-bottom)); max-width: 620px; margin: 0 auto; }
 .sheet-box h3 { margin-top: 0; padding-right: 40px; font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--ink); }
-.sheet-x { position: absolute; top: 8px; right: 10px; border: 0; background: none; font-size: 30px; color: var(--muted); cursor: pointer; padding: 4px 10px; }
+.sheet-x { position: absolute; top: 4px; right: 4px; border: 0; background: none; font-size: 30px; color: var(--muted); cursor: pointer; padding: 6px 16px; min-width: 48px; min-height: 48px; }
 .popup { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(6, 14, 44, .6); }
 .popup.open { display: flex; }
 .popup-box { background: var(--card); border-radius: 18px; border-top: 3px solid var(--gold); padding: 18px; width: 100%; max-width: 420px; max-height: 86vh; overflow-y: auto; }

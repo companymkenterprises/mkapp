@@ -48,7 +48,7 @@ VIEWS.sales = async (parts, query) => {
     ${
       d.products.length
         ? '<h3>Sales by product</h3>' +
-          table('<th>Product</th><th class="num">Boxes</th><th class="num">Sales</th>', d.products.map((p) => `<tr><td>${esc(p.brand)} ${esc(p.pack)}</td><td class="num">${num(p.qty)}${p.pieces ? `<div class="muted small">+ ${num(p.pieces)} pcs</div>` : ''}</td><td class="num">${rs(p.amount)}</td></tr>`).join(''))
+          table('<th>Product</th><th class="num">Boxes</th><th class="num">Sales</th>', d.products.map((p) => `<tr><td>${esc(p.brand)} ${esc(p.pack)}</td><td class="num">${num(p.qty)}${p.pieces ? `<div class="muted small">+ ${num(p.pieces)} ${p.unit === 'Bag' ? 'packets' : 'pcs'}</div>` : ''}</td><td class="num">${rs(p.amount)}</td></tr>`).join(''))
         : ''
     }
     ${
@@ -75,28 +75,36 @@ VIEWS.staff = async () => {
       ? S.boot.routes.map((r) => `<label class="check"><input type="checkbox" name="u-route" value="${r.id}"${ids.includes(r.id) ? ' checked' : ''}>${esc(r.name)}</label>`).join('')
       : '<p class="muted">No routes yet. Add them in More → Routes.</p>';
   const checkedRoutes = () => $$('input[name=u-route]:checked').map((i) => +i.value);
+  const tickedRoles = () => $$('input[name=u-role]:checked').map((i) => i.value);
   Object.assign(ACT, {
     editUser: (el) => {
       const u = list.find((x) => x.id === +el.dataset.id) || { name: '', mobile: '', role: 'executive', active: 1, route_ids: [] };
       sheet(`<h3>${u.id ? 'Edit staff' : 'New staff'}</h3>
         <label class="f" for="u-name">Name</label><input id="u-name" value="${esc(u.name)}">
         <label class="f" for="u-mobile">Mobile number (used for login)</label><input id="u-mobile" type="tel" inputmode="numeric" maxlength="10" value="${esc(u.mobile)}">
-        <label class="f" for="u-role">Role</label><select id="u-role" data-change="roleChanged">${options([{ id: 'executive', name: 'Executive' }, { id: 'manager', name: 'Manager' }, { id: 'admin', name: 'Admin' }], u.role)}</select>
+        <label class="f">Role (tick one or more)</label>
+        ${ROLE_LIST.map((r) => `<label class="check"><input type="checkbox" name="u-role" value="${r}" data-change="roleChanged"${rolesOf(u).includes(r) ? ' checked' : ''}>${ROLE_NAME[r]}</label>`).join('')}
         <label class="f" for="u-pin">${u.id ? 'New PIN (leave empty to keep the old one)' : 'PIN (6 numbers)'}</label><input id="u-pin" class="pin" type="text" inputmode="numeric" maxlength="6" autocomplete="off" data-input="digits">
         <label class="f" for="u-email">Email address (if any)</label><input id="u-email" type="email" inputmode="email" autocomplete="off" value="${esc(u.email || '')}">
-        <div id="u-routes-box"${u.role === 'admin' ? ' hidden' : ''}>
+        <div id="u-routes-box"${rolesOf(u).join() === 'admin' ? ' hidden' : ''}>
         <label class="f" for="u-from">Hired from</label><select id="u-from">${options(HIRED_FROM.map((x) => ({ id: x, name: x })), u.hired_from, 'Not filled')}</select>
         <label class="f" for="u-joined">Joining date</label><input id="u-joined" type="date" max="${S.boot.today}" value="${esc(u.joined_on || (u.id ? '' : S.boot.today))}">
-        <label class="f" for="u-salary">Monthly salary (₹)</label><input id="u-salary" type="number" inputmode="decimal" min="0" value="${u.salary || ''}" placeholder="Leave empty if not decided">
+        <label class="f" for="u-per">Salary is paid</label><select id="u-per">${options(PAY_PER, u.per || 'month')}</select>
+        <label class="f" for="u-salary">Salary for one month or one week (₹)</label><input id="u-salary" type="number" inputmode="decimal" min="0" value="${u.salary || ''}" placeholder="Leave empty if not decided">
         <label class="f" for="u-ot">Overtime pay for one hour (₹)</label><input id="u-ot" type="number" inputmode="decimal" min="0" value="${u.ot_rate || ''}">
         ${u.id ? '<p class="muted small">A new salary counts from this month. Earlier months keep the old salary.</p>' : ''}
-        <label class="f">Routes</label>${routeChecks(u.route_ids)}</div>
+        <div id="u-routes-only"${rolesOf(u).some((r) => r === 'manager' || r === 'executive') ? '' : ' hidden'}><label class="f">Routes</label>${routeChecks(u.route_ids)}</div></div>
         ${u.id ? `<label class="check"><input type="checkbox" id="u-active"${u.active ? ' checked' : ''}>${u.left_on ? 'Working with us again (tick if they came back)' : 'Working with us (untick to block login)'}</label>` : ''}
         <div class="btns"><button class="btn big" data-act="saveUser" data-id="${u.id || ''}">Save</button></div>
-        ${u.id && u.id !== S.user.id ? `<div class="btns"><button class="btn danger sm" data-act="delUser" data-id="${u.id}" data-name="${esc(u.name)}" data-role="${u.role}">Delete this staff member</button></div>` : ''}`);
+        ${u.id && u.id !== S.user.id ? `<div class="btns"><button class="btn danger sm" data-act="delUser" data-id="${u.id}" data-name="${esc(u.name)}" data-role="${ROLE_NAME[u.role].toLowerCase()}">Delete this staff member</button></div>` : ''}`);
     },
-    // An admin has only name, mobile, email and PIN. Hiring details, salary and routes are asked for a manager or an executive.
-    roleChanged: (el) => ($('#u-routes-box').hidden = el.value === 'admin'),
+    // Someone who is only admin has just name, mobile, email and PIN. Hiring details and salary are asked for every other role;
+    // routes for a manager or an executive.
+    roleChanged: () => {
+      const roles = tickedRoles();
+      $('#u-routes-box').hidden = roles.join() === 'admin';
+      $('#u-routes-only').hidden = !roles.some((r) => r === 'manager' || r === 'executive');
+    },
     delUser: (el) =>
       askDelete(`Delete ${el.dataset.name}?`, `The login is removed. If orders, money or other entries are saved in their name, those entries stay and show the name as "ex ${el.dataset.role} ${el.dataset.name}".`, async () => {
         const r = await api('POST', `/users/${el.dataset.id}/delete`);
@@ -106,8 +114,9 @@ VIEWS.staff = async () => {
         if (r.left) setTimeout(() => toast(`Login removed. Old entries now show "${r.name}"`), 50);
       }),
     saveUser: async (el) => {
-      const role = $('#u-role').value;
-      const body = { name: $('#u-name').value, mobile: $('#u-mobile').value, email: $('#u-email').value, role, pin: $('#u-pin').value, hired_from: $('#u-from').value, joined_on: $('#u-joined').value, salary: $('#u-salary').value, ot_rate: $('#u-ot').value, route_ids: role === 'admin' ? [] : checkedRoutes() };
+      const roles = tickedRoles();
+      if (!roles.length) throw new Error('Tick at least one role');
+      const body = { name: $('#u-name').value, mobile: $('#u-mobile').value, email: $('#u-email').value, roles, pin: $('#u-pin').value, hired_from: $('#u-from').value, joined_on: $('#u-joined').value, salary: $('#u-salary').value, per: $('#u-per').value, ot_rate: $('#u-ot').value, route_ids: checkedRoutes() };
       if (el.dataset.id) await api('PUT', `/users/${el.dataset.id}`, { ...body, active: $('#u-active').checked });
       else await api('POST', '/users', body);
       closeSheet();
@@ -132,22 +141,22 @@ VIEWS.staff = async () => {
   const sunday = isSunday(S.boot.today);
   return `${isAdmin() ? '<div class="btns"><button class="btn" data-act="editUser">+ New staff</button></div>' : ''}
     ${searchBox('Search name, mobile or route')}
-    ${quickChips([['', 'All'], ['executive', 'Executives'], ['manager', 'Managers'], ['admin', 'Admin'], ['blocked', 'Blocked'], ['left', 'Left us']])}
+    ${quickChips([['', 'All'], ['executive', 'Executives'], ['manager', 'Managers'], ['factory', 'Factory staff'], ['admin', 'Admin'], ['blocked', 'Blocked'], ['left', 'Left us']])}
     <div id="quick-list">${list
       .map(
-        (u) => `<div class="card" data-item data-k="${u.left_on ? 'left' : u.role + (u.active ? '' : '|blocked')}">
+        (u) => `<div class="card" data-item data-k="${u.left_on ? 'left' : rolesOf(u).join('|') + (u.active ? '' : '|blocked')}">
           <div class="row"><b class="grow">${esc(u.name)}</b>
-            ${u.left_on ? `<span class="tag cancelled">Ex ${ROLE_NAME[u.role].toLowerCase()}</span>` : !u.active ? '<span class="tag cancelled">Blocked</span>' : u.role === 'admin' ? '' : !u.attendance && sunday ? '<span class="tag present">Sunday off</span>' : `<span class="tag ${u.attendance || 'pending'}">${ATT[u.attendance] || 'Not marked'}</span>`}</div>
-          <div class="muted">${ROLE_NAME[u.role]} · ${tel(u.mobile, '')}</div>
+            ${u.left_on ? `<span class="tag cancelled">Ex ${ROLE_NAME[u.role].toLowerCase()}</span>` : !u.active ? '<span class="tag cancelled">Blocked</span>' : rolesOf(u).join() === 'admin' ? '' : !u.attendance && sunday ? '<span class="tag present">Sunday off</span>' : `<span class="tag ${u.attendance || 'pending'}">${ATT[u.attendance] || 'Not marked'}</span>`}</div>
+          <div class="muted">${roleNames(u)} · ${tel(u.mobile, '')}</div>
           ${u.email ? `<div class="muted small">${esc(u.email)}</div>` : ''}
           ${u.joined_on || u.hired_from || u.left_on ? `<div class="muted small">${esc(dots(u.joined_on ? 'Joined ' + fmtDate(u.joined_on) : '', u.hired_from ? 'from ' + u.hired_from : '', u.left_on ? 'left on ' + fmtDate(u.left_on) : ''))}</div>` : ''}
-          ${isAdmin() && u.role !== 'admin' && u.salary ? `<div class="muted small">Salary ${rs(u.salary)} a month</div>` : ''}
-          ${u.role === 'executive' ? `<div class="muted">Routes: ${routeNames(u.route_ids) || '<span class="red">none given</span>'}</div>` : ''}
-          ${u.role === 'manager' && u.route_ids.length ? `<div class="muted">Routes: ${routeNames(u.route_ids)}</div>` : ''}
+          ${isAdmin() && rolesOf(u).join() !== 'admin' && u.salary ? `<div class="muted small">Salary ${rs(u.salary)} a ${u.per === 'week' ? 'week' : 'month'}</div>` : ''}
+          ${rolesOf(u).includes('executive') ? `<div class="muted">Routes: ${routeNames(u.route_ids) || '<span class="red">none given</span>'}</div>` : ''}
+          ${!rolesOf(u).includes('executive') && rolesOf(u).includes('manager') && u.route_ids.length ? `<div class="muted">Routes: ${routeNames(u.route_ids)}</div>` : ''}
           <div class="btns">
             ${isAdmin() ? `<button class="btn light sm" data-act="editUser" data-id="${u.id}">Edit</button>` : u.role === 'executive' ? `<button class="btn light sm" data-act="editRoutes" data-id="${u.id}">Change routes</button>` : ''}
-            <a class="btn light sm" href="#/orders?tab=history&user=${u.id}">Orders</a>
-            ${isAdmin() && u.role !== 'admin' ? `<a class="btn light sm" href="#/team/${u.id}">Work and salary</a>` : ''}
+            ${u.role === 'factory' ? '' : `<a class="btn light sm" href="#/orders?tab=history&user=${u.id}">Orders</a>`}
+            ${isAdmin() && rolesOf(u).join() !== 'admin' ? `<a class="btn light sm" href="#/team/${u.id}">Work and salary</a>` : ''}
           </div>
         </div>`
       )
@@ -155,6 +164,8 @@ VIEWS.staff = async () => {
 };
 
 // ---------- team: work and salary of each person, counted from the joining date ----------
+// The salary amount is for a month, or for a week (factory staff are often paid by the week).
+const PAY_PER = [{ id: 'month', name: 'Every month' }, { id: 'week', name: 'Every week' }];
 const monthName = (m) => `${MONTHS[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
 const pendingText = (p) =>
   !p.salary && !p.earned && !p.paid ? '<span class="muted">Salary not set</span>' : p.pending < 0 ? `<b>Paid in advance ${rs(-p.pending)}</b>` : p.pending > 0 ? `<b class="red">Salary pending ${rs(p.pending)}</b>` : '<b>✓ Salary fully paid</b>';
@@ -166,17 +177,17 @@ VIEWS.team = async (parts) => {
   const d = await api('GET', '/team');
   if (!d.list.length) return `<div class="empty">${isAdmin() ? 'No staff yet. Add them in More → Staff.' : 'No executive is on your routes yet.'}</div>`;
   const pending = d.list.reduce((s, p) => s + Math.max(0, p.pending), 0);
-  return `<p class="muted">${isAdmin() ? 'Every manager and executive.' : 'The executives on your routes.'} Everything is counted from the joining date.</p>
+  return `<p class="muted">${isAdmin() ? 'Everyone who gets a salary.' : 'The executives on your routes and the factory staff.'} Everything is counted from the joining date.</p>
     <div class="tiles">${tile('#/team', rs(pending), 'Salary pending now', pending ? 'warn' : '')}${tile('#/team', String(d.list.filter((p) => !p.left_on).length), 'Working with us')}</div>
     ${searchBox('Search name, mobile or route')}
-    ${quickChips([['', 'All'], ['pending', 'Salary pending'], ['executive', 'Executives'], ...(isAdmin() ? [['manager', 'Managers']] : []), ['left', 'Left us']])}
+    ${quickChips([['', 'All'], ['pending', 'Salary pending'], ['executive', 'Executives'], ['factory', 'Factory staff'], ...(isAdmin() ? [['manager', 'Managers']] : []), ['left', 'Left us']])}
     <div id="quick-list">${d.list
       .map(
-        (p) => `<a class="card" href="#/team/${p.id}" data-item data-k="${p.left_on ? 'left' : p.role}${p.pending > 0 ? '|pending' : ''}">
+        (p) => `<a class="card" href="#/team/${p.id}" data-item data-k="${p.left_on ? 'left' : rolesOf(p).join('|')}${p.pending > 0 ? '|pending' : ''}">
           <div class="row"><b class="grow">${esc(p.name)}</b>${exTag(p)}</div>
-          <div class="muted">${esc(dots(ROLE_NAME[p.role], teamRoutes(p), 'joined ' + fmtDate(p.since), p.left_on ? 'left ' + fmtDate(p.left_on) : ''))}</div>
+          <div class="muted">${esc(dots(roleNames(p), teamRoutes(p), 'joined ' + fmtDate(p.since), p.left_on ? 'left ' + fmtDate(p.left_on) : ''))}</div>
           <div class="small">${esc(dots(plural(p.taken_count, 'order') + ' taken', plural(p.delivered_count, 'delivery').replace('deliverys', 'deliveries'), 'sales ' + rs(p.sales), 'collected ' + rs(p.collected)))}</div>
-          <div class="small">${esc(dots(p.salary ? 'Salary ' + rs(p.salary) : '', 'paid ' + rs(p.paid), p.ot_hours ? `overtime ${num(p.ot_hours)} h` : ''))}</div>
+          <div class="small">${esc(dots(p.salary ? `Salary ${rs(p.salary)} a ${p.per === 'week' ? 'week' : 'month'}` : '', 'paid ' + rs(p.paid), p.ot_hours ? `overtime ${num(p.ot_hours)} h` : ''))}</div>
           <div>${pendingText(p)}</div>
           <div class="small">Company money with them: <b>${rs(p.money)}</b>${p.money_checked ? ` <span class="muted">· checked ${fmtDate(p.money_checked)}</span>` : ''}</div>
         </a>`
@@ -203,12 +214,13 @@ async function teamMember(id) {
     },
     changeSalary: () =>
       sheet(`<h3>Salary of ${esc(d.person.name)}</h3>
-        <label class="f" for="cs-salary">Monthly salary (₹)</label><input id="cs-salary" type="number" inputmode="decimal" min="0" value="${d.person.salary || ''}">
+        <label class="f" for="cs-per">Salary is paid</label><select id="cs-per">${options(PAY_PER, d.person.per || 'month')}</select>
+        <label class="f" for="cs-salary">Salary for one month or one week (₹)</label><input id="cs-salary" type="number" inputmode="decimal" min="0" value="${d.person.salary || ''}">
         <label class="f" for="cs-ot">Overtime pay for one hour (₹)</label><input id="cs-ot" type="number" inputmode="decimal" min="0" value="${d.person.ot_rate || ''}">
         <p class="muted small">A new salary counts from this month. Earlier months keep the old salary.</p>
         <div class="btns"><button class="btn big" data-act="saveSalary">Save</button></div>`),
     saveSalary: async () => {
-      await api('PUT', `/team/${id}/salary`, { salary: $('#cs-salary').value, ot_rate: $('#cs-ot').value });
+      await api('PUT', `/team/${id}/salary`, { salary: $('#cs-salary').value, per: $('#cs-per').value, ot_rate: $('#cs-ot').value });
       closeSheet();
       toast('Saved');
       refresh();
@@ -224,7 +236,7 @@ async function teamMember(id) {
   const m = d.thisMonth;
   const work = (x) => `<td class="num">${x.taken_count}</td><td class="num">${x.delivered_count}</td><td class="num">${rs(x.sales)}</td><td class="num">${rs(x.collected)}</td>`;
   return `<div class="row"><h2 class="grow">${esc(p.name)}</h2>${exTag(p)}</div>
-    <p class="muted">${esc(dots(ROLE_NAME[p.role], teamRoutes(p), p.hired_from ? 'from ' + p.hired_from : ''))}<br>
+    <p class="muted">${esc(dots(roleNames(p), teamRoutes(p), p.hired_from ? 'from ' + p.hired_from : ''))}<br>
       Joined ${fmtDate(p.since)}${p.left_on ? ' · left ' + fmtDate(p.left_on) : ''}</p>
     <div class="btns">${tel(p.mobile)}<a class="btn light" href="#/orders?tab=history&user=${p.id}">Orders</a></div>
 
@@ -233,10 +245,16 @@ async function teamMember(id) {
       ${tile(`#/team/${p.id}`, rs(p.earned + p.ot_pay), 'Earned since joining', '', p.ot_pay ? `with overtime ${rs(p.ot_pay)}` : '')}
       ${tile(`#/team/${p.id}`, rs(p.paid), 'Salary paid')}
       ${tile(`#/team/${p.id}`, rs(Math.abs(p.pending)), p.pending < 0 ? 'Paid in advance' : 'Salary pending', p.pending > 0 ? 'warn' : '')}
-      ${tile(`#/team/${p.id}`, p.salary ? rs(p.salary) : 'Not set', 'Salary for a month', '', p.ot_rate ? `overtime ${rs(p.ot_rate)} an hour` : '')}
+      ${tile(`#/team/${p.id}`, p.salary ? rs(p.salary) : 'Not set', p.per === 'week' ? 'Salary for a week' : 'Salary for a month', '', p.ot_rate ? `overtime ${rs(p.ot_rate)} an hour` : '')}
     </div>
     <div class="btns"><button class="btn" data-act="paySalary">+ Salary paid</button><button class="btn light" data-act="changeSalary">Change salary</button></div>
-    <p class="muted small">One day's pay = monthly salary ÷ days in the month. Absent (without informing) = no pay, half day = half pay. Leave (approved) and all other days are paid. Counted up to today.</p>
+    ${
+      p.week
+        ? `<div class="banner ${p.week.pay + p.week.ot_pay - p.week.paid > 0 ? 'warn' : 'ok'}"><div><div class="small">This week (${fmtDate(p.week.from)} to today, ${plural(p.week.days, 'day')}${p.week.absent ? `, ${p.week.absent} absent` : ''}${p.week.half ? `, ${p.week.half} half` : ''})</div>
+            <div class="balance">Earned ${rs(p.week.pay + p.week.ot_pay)} · paid ${rs(p.week.paid)}</div></div></div>`
+        : ''
+    }
+    <p class="muted small">One day's pay = ${p.per === 'week' ? 'weekly salary ÷ 7' : 'monthly salary ÷ days in the month'}. Absent (without informing) = no pay, half day = half pay. Leave (approved) and all other days are paid. Counted up to today.</p>
 
     <h3>Company money</h3>
     <a class="banner ${p.money > 0 ? 'warn' : 'ok'}" href="#/money/${p.id}"><div><div class="small">Company money with ${esc(p.name)} now${p.money_checked ? ' · last checked ' + fmtDate(p.money_checked) : ' · never checked'}</div><div class="balance">${rs(p.money)}</div></div><span class="btn light sm">Open</span></a>
@@ -273,8 +291,23 @@ VIEWS.attendance = async (parts, query) => {
   let d;
   Object.assign(ACT, {
     date: (el) => el.value && go(`#/attendance?date=${el.value}`),
+    // Present and half day keep the time of the tap; absent keeps nothing; leave asks for a note first.
     mark: async (el) => {
+      if (el.dataset.val === 'leave') {
+        return sheet(`<h3>Leave of ${esc(el.dataset.name)}</h3>
+          <p class="muted">${fmtDate(d.date)} · Leave is with approval and is paid.</p>
+          <label class="f" for="lv-note">Note (if any)</label><input id="lv-note" value="${esc(el.dataset.note || '')}" placeholder="Example: fever, approved by Imran">
+          <div class="btns"><button class="btn big" data-act="saveLeave" data-id="${el.dataset.id}">Save leave</button></div>`);
+      }
+      // The tapped button lights up at once; the saving goes on behind.
+      $$('.chip', el.parentElement).forEach((c) => c.classList.toggle('on', c === el));
       await api('PUT', '/attendance', { user_id: el.dataset.id, date: d.date, status: el.dataset.val });
+      refresh();
+    },
+    saveLeave: async (el) => {
+      await api('PUT', '/attendance', { user_id: el.dataset.id, date: d.date, status: 'leave', note: $('#lv-note').value });
+      closeSheet();
+      toast('Leave saved');
       refresh();
     },
     overtime: (el) =>
@@ -298,8 +331,9 @@ VIEWS.attendance = async (parts, query) => {
           '<div id="quick-list">' +
           d.list
             .map(
-              (u) => `<div class="card" data-item><div class="row"><b class="grow">${esc(u.name)}</b><span class="muted small">${u.in_time ? 'In: ' + esc(u.in_time) : ''}</span></div>
-                <div class="chips">${Object.entries(ATT).map(([v, t]) => `<button class="chip${u.status === v ? ' on' : ''}" data-act="mark" data-id="${u.id}" data-val="${v}">${t}</button>`).join('')}</div>
+              (u) => `<div class="card" data-item><div class="row"><b class="grow">${esc(u.name)}</b><span class="muted small">${u.in_time ? 'Came in: ' + esc(u.in_time) : ''}</span></div>
+                ${u.status === 'leave' && u.note ? `<div class="muted small">Leave note: ${esc(u.note)}</div>` : ''}
+                <div class="chips">${Object.entries(ATT).map(([v, t]) => `<button class="chip${u.status === v ? ' on' : ''}" data-act="mark" data-id="${u.id}" data-val="${v}" data-name="${esc(u.name)}" data-note="${esc(u.note || '')}">${t}</button>`).join('')}</div>
                 <div class="btns"><button class="btn light sm" data-act="overtime" data-id="${u.id}" data-name="${esc(u.name)}" data-hours="${u.ot_hours}">${u.ot_hours ? `Overtime: ${num(u.ot_hours)} h` : '+ Overtime'}</button></div></div>`
             )
             .join('') +
@@ -382,13 +416,14 @@ VIEWS.products = async () => {
       sheet(`<h3>New box type</h3>
         <label class="f" for="np-name">Name (example: 2 kg Box)</label><input id="np-name">
         <label class="f" for="np-unit">Box or bag</label><select id="np-unit"><option>Box</option><option>Bag</option></select>
-        <label class="f" for="np-pieces">Total pieces in one box / bag</label><input id="np-pieces" type="number" inputmode="numeric" min="1">
+        <label class="f" for="np-pieces">Pieces in one box. For a bag: packets in one bag</label><input id="np-pieces" type="number" inputmode="numeric" min="1">
         <label class="f" for="np-detail">Details (example: 12 packs x 10 pieces)</label><input id="np-detail">
         <label class="f" for="np-mat">Which bottle is used</label><select id="np-mat">${options(mats, '', 'None')}</select>
+        <label class="f" for="np-uses">Only for a bag: pouches used for one bag</label><input id="np-uses" type="number" inputmode="numeric" min="1" placeholder="Example: 500">
         <div class="btns"><button class="btn big" data-act="savePack">Save</button></div>`);
     },
     savePack: async () => {
-      await api('POST', '/packs', { name: $('#np-name').value, unit: $('#np-unit').value, pieces: $('#np-pieces').value, detail: $('#np-detail').value, material_id: $('#np-mat').value });
+      await api('POST', '/packs', { name: $('#np-name').value, unit: $('#np-unit').value, pieces: $('#np-pieces').value, detail: $('#np-detail').value, material_id: $('#np-mat').value, material_qty: $('#np-uses').value });
       closeSheet();
       await loadBoot();
       toast('Box type added');
@@ -597,6 +632,7 @@ VIEWS.settings = async () => {
       business_name: $('#set-name').value,
       business_address: $('#set-address').value,
       business_phone: $('#set-phone').value,
+      business_gst: $('#set-gst').value,
       indiamart_key: $('#set-im').value,
       indiamart_off: $('#set-im-off')?.checked || false,
     });
@@ -608,6 +644,7 @@ VIEWS.settings = async () => {
     <label class="f" for="set-name">Business name (shown on top of the app and on the bill)</label><input id="set-name" value="${esc(S.business)}" required>
     <label class="f" for="set-address">Address (printed on the bill)</label><textarea id="set-address">${esc(S.boot.settings.business_address)}</textarea>
     <label class="f" for="set-phone">Phone number (printed on the bill)</label><input id="set-phone" type="tel" value="${esc(S.boot.settings.business_phone)}">
+    <label class="f" for="set-gst">GST number, if any (printed on the bill)</label><input id="set-gst" maxlength="15" autocapitalize="characters" value="${esc(S.boot.settings.business_gst || '')}">
     <h3>IndiaMART</h3>
     <p class="muted">${d.indiamart_on ? '✓ Connected. New enquiries come into the app by themselves.' : 'Not connected. Paste the CRM key from IndiaMART (Lead Manager → Settings → CRM integration / Pull API) to bring enquiries into the app.'}</p>
     ${d.indiamart_error ? `<div class="banner bad">${esc(d.indiamart_error)}</div>` : ''}
@@ -620,7 +657,7 @@ VIEWS.settings = async () => {
 for (const name of ['sales', 'staff', 'team', 'attendance', 'routes', 'products', 'lost', 'settings', 'count', 'leads']) {
   const view = VIEWS[name];
   VIEWS[name] = (parts, query) => {
-    if (!isStaff() || (['products', 'settings'].includes(name) && !isAdmin())) return '<div class="empty">This page is only for the manager.</div>';
+    if (!(name === 'count' ? canMake() : isStaff()) || (['products', 'settings'].includes(name) && !isAdmin())) return '<div class="empty">This page is only for the manager.</div>';
     return view(parts, query);
   };
 }
