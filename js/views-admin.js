@@ -81,10 +81,10 @@ VIEWS.staff = async () => {
       const u = list.find((x) => x.id === +el.dataset.id) || { name: '', mobile: '', role: 'executive', active: 1, route_ids: [] };
       sheet(`<h3>${u.id ? 'Edit staff' : 'New staff'}</h3>
         <label class="f" for="u-name">Name</label><input id="u-name" value="${esc(u.name)}">
-        <label class="f" for="u-mobile">Mobile number (used for login)</label><input id="u-mobile" type="tel" inputmode="numeric" maxlength="10" value="${esc(u.mobile)}">
+        <label class="f" for="u-mobile">Mobile number for login (leave empty = no login)</label><input id="u-mobile" type="tel" inputmode="numeric" maxlength="10" value="${esc(u.mobile)}">
         <label class="f">Role (tick one or more)</label>
         ${ROLE_LIST.map((r) => `<label class="check"><input type="checkbox" name="u-role" value="${r}" data-change="roleChanged"${rolesOf(u).includes(r) ? ' checked' : ''}>${ROLE_NAME[r]}</label>`).join('')}
-        <label class="f" for="u-pin">${u.id ? 'New PIN (leave empty to keep the old one)' : 'PIN (6 numbers)'}</label><input id="u-pin" class="pin" type="text" inputmode="numeric" maxlength="6" autocomplete="off" data-input="digits">
+        <label class="f" for="u-pin">${u.id && u.mobile ? 'New PIN (leave empty to keep the old one)' : 'PIN (6 numbers) – only with a mobile number'}</label><input id="u-pin" class="pin" type="text" inputmode="numeric" maxlength="6" autocomplete="off" data-input="digits">
         <label class="f" for="u-email">Email address (if any)</label><input id="u-email" type="email" inputmode="email" autocomplete="off" value="${esc(u.email || '')}">
         <div id="u-routes-box"${rolesOf(u).join() === 'admin' ? ' hidden' : ''}>
         <label class="f" for="u-from">Hired from</label><select id="u-from">${options(HIRED_FROM.map((x) => ({ id: x, name: x })), u.hired_from, 'Not filled')}</select>
@@ -147,7 +147,7 @@ VIEWS.staff = async () => {
         (u) => `<div class="card" data-item data-k="${u.left_on ? 'left' : rolesOf(u).join('|') + (u.active ? '' : '|blocked')}">
           <div class="row"><b class="grow">${esc(u.name)}</b>
             ${u.left_on ? `<span class="tag cancelled">Ex ${ROLE_NAME[u.role].toLowerCase()}</span>` : !u.active ? '<span class="tag cancelled">Blocked</span>' : rolesOf(u).join() === 'admin' ? '' : !u.attendance && sunday ? '<span class="tag present">Sunday off</span>' : `<span class="tag ${u.attendance || 'pending'}">${ATT[u.attendance] || 'Not marked'}</span>`}</div>
-          <div class="muted">${roleNames(u)} · ${tel(u.mobile, '')}</div>
+          <div class="muted">${dots(roleNames(u), u.mobile ? tel(u.mobile, '') : 'no login')}</div>
           ${u.email ? `<div class="muted small">${esc(u.email)}</div>` : ''}
           ${u.joined_on || u.hired_from || u.left_on ? `<div class="muted small">${esc(dots(u.joined_on ? 'Joined ' + fmtDate(u.joined_on) : '', u.hired_from ? 'from ' + u.hired_from : '', u.left_on ? 'left on ' + fmtDate(u.left_on) : ''))}</div>` : ''}
           ${isAdmin() && rolesOf(u).join() !== 'admin' && u.salary ? `<div class="muted small">Salary ${rs(u.salary)} a ${u.per === 'week' ? 'week' : 'month'}</div>` : ''}
@@ -287,6 +287,14 @@ async function teamMember(id) {
     }`;
 }
 
+// "09:42 am" as saved, back to "09:42" for the clock box.
+const clock24 = (t) => {
+  const m = /^(\d{1,2}):(\d{2})\s*([ap])m$/i.exec(String(t || '').trim());
+  if (!m) return '';
+  const h = (+m[1] % 12) + (m[3].toLowerCase() === 'p' ? 12 : 0);
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
+};
+
 VIEWS.attendance = async (parts, query) => {
   let d;
   Object.assign(ACT, {
@@ -299,9 +307,25 @@ VIEWS.attendance = async (parts, query) => {
           <label class="f" for="lv-note">Note (if any)</label><input id="lv-note" value="${esc(el.dataset.note || '')}" placeholder="Example: fever, approved by Imran">
           <div class="btns"><button class="btn big" data-act="saveLeave" data-id="${el.dataset.id}">Save leave</button></div>`);
       }
-      // The tapped button lights up at once; the saving goes on behind.
+      // Present or half day: a clock opens to choose the coming-in time (the time now, or the one already saved).
+      if (el.dataset.val !== 'absent') {
+        const now = new Date();
+        const hm = clock24(el.dataset.time) || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        return sheet(`<h3>${ATT[el.dataset.val]} – ${esc(el.dataset.name)}</h3>
+          <p class="muted">${fmtDate(d.date)}</p>
+          <label class="f" for="at-time">Came in at</label><input id="at-time" type="time" value="${hm}">
+          <div class="btns"><button class="btn big" data-act="saveMark" data-id="${el.dataset.id}" data-val="${el.dataset.val}">Mark ${ATT[el.dataset.val].toLowerCase()}</button></div>`);
+      }
+      // Absent: no time. The tapped button lights up at once; the saving goes on behind.
       $$('.chip', el.parentElement).forEach((c) => c.classList.toggle('on', c === el));
       await api('PUT', '/attendance', { user_id: el.dataset.id, date: d.date, status: el.dataset.val });
+      refresh();
+    },
+    saveMark: async (el) => {
+      if (!$('#at-time').value) throw new Error('Select the time');
+      await api('PUT', '/attendance', { user_id: el.dataset.id, date: d.date, status: el.dataset.val, time: $('#at-time').value });
+      closeSheet();
+      toast('Saved');
       refresh();
     },
     saveLeave: async (el) => {
@@ -333,7 +357,7 @@ VIEWS.attendance = async (parts, query) => {
             .map(
               (u) => `<div class="card" data-item><div class="row"><b class="grow">${esc(u.name)}</b><span class="muted small">${u.in_time ? 'Came in: ' + esc(u.in_time) : ''}</span></div>
                 ${u.status === 'leave' && u.note ? `<div class="muted small">Leave note: ${esc(u.note)}</div>` : ''}
-                <div class="chips">${Object.entries(ATT).map(([v, t]) => `<button class="chip${u.status === v ? ' on' : ''}" data-act="mark" data-id="${u.id}" data-val="${v}" data-name="${esc(u.name)}" data-note="${esc(u.note || '')}">${t}</button>`).join('')}</div>
+                <div class="chips">${Object.entries(ATT).map(([v, t]) => `<button class="chip${u.status === v ? ' on' : ''}" data-act="mark" data-id="${u.id}" data-val="${v}" data-name="${esc(u.name)}" data-note="${esc(u.note || '')}" data-time="${esc(u.in_time || '')}">${t}</button>`).join('')}</div>
                 <div class="btns"><button class="btn light sm" data-act="overtime" data-id="${u.id}" data-name="${esc(u.name)}" data-hours="${u.ot_hours}">${u.ot_hours ? `Overtime: ${num(u.ot_hours)} h` : '+ Overtime'}</button></div></div>`
             )
             .join('') +

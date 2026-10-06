@@ -64,11 +64,12 @@ GLOBAL_ACT.pay = (el) =>
     <input id="pay-amount" type="number" inputmode="decimal" min="1">
     <div class="chips" id="pay-mode">${S.boot.payModes.map((m, i) => `<button class="chip${i ? '' : ' on'}" data-act="chip" data-val="${m}">${m}</button>`).join('')}</div>
     ${moneyWentTo('pay-to', 'My account')}
+    ${secondPay('pay', 'My account')}
     <label class="f" for="pay-note">Note (if any)</label>
     <input id="pay-note" type="text">
     <div class="btns"><button class="btn big" data-act="savePay" data-id="${esc(el.dataset.id)}">Save</button></div>`);
 GLOBAL_ACT.savePay = async (el) => {
-  const r = await api('POST', '/payments', { customer_id: el.dataset.id, amount: $('#pay-amount').value, mode: chipVal('pay-mode'), to: chipVal('pay-to'), note: $('#pay-note').value });
+  const r = await api('POST', '/payments', { customer_id: el.dataset.id, amount: $('#pay-amount').value, mode: chipVal('pay-mode'), to: chipVal('pay-to'), note: $('#pay-note').value, ...secondPayBody('pay') });
   closeSheet();
   toast(`Saved. Balance now ${rs(r.balance)}`);
   refresh();
@@ -165,6 +166,7 @@ VIEWS.shop = async (parts) => {
     <p class="muted">${[TYPE_NAME[c.type], c.owner, c.route].filter(Boolean).map(esc).join(' · ')}</p>
     ${c.mobile ? `<div class="btns">${tel(c.mobile)}</div>` : '<p class="muted small">No mobile number saved</p>'}
     ${c.gst ? `<p class="muted">GST no: <b>${esc(c.gst)}</b></p>` : ''}
+    ${c.added_by ? `<p class="muted small">Added by <b>${esc(c.added_by)}</b> on ${fmtDate(c.added_on)}</p>` : ''}
     ${c.address ? `<div class="btns">${mapLink(c.address, 'btn light')}</div>` : ''}
     <div class="banner ${c.balance > 0 ? 'bad' : 'ok'}">
       <div><div class="small">Balance to collect</div><div class="balance">${rs(c.balance)}</div></div>
@@ -247,10 +249,32 @@ VIEWS.shopform = async (parts, query) => {
     const body = { type: id ? $('#f-type').value : newType, name: $('#f-name').value, owner: $('#f-owner').value, mobile: $('#f-mobile').value, route_id: $('#f-route')?.value || '', address: $('#f-address').value, gst: $('#f-gst').value };
     if (isStaff()) Object.assign(body, { opening_balance: $('#f-balance').value, call_every_days: $('#f-every').value });
     if (!id) Object.assign(body, { rates: typedRates(), lead_id: query.lead || '' });
-    const r = id ? await api('PUT', `/customers/${id}`, body) : await api('POST', '/customers', body);
-    toast('Saved');
-    if (id) history.back();
-    else location.replace(`#/shop/${r.id}`);
+    const send = async (extra) => {
+      const r = id ? await api('PUT', `/customers/${id}`, body) : await api('POST', '/customers', { ...body, ...extra });
+      // The same name and address is already there: nothing was saved. Show it and ask.
+      if (r.duplicate) {
+        ACT.saveDifferent = () => send({ different: true });
+        const what = body.type === 'customer' ? 'customer' : 'shop';
+        return sheet(`<h3>This ${what} is already there</h3>
+          <p class="muted">The same name and address is already saved. Look at it before adding it again.</p>
+          ${r.duplicate
+            .map(
+              (c) => `<div class="card"><b>${esc(c.name)}</b>
+                <div class="muted">${esc(dots(TYPE_NAME[c.type], c.owner, c.route, c.mobile))}</div>
+                ${c.address ? `<div class="small">${mapLink(c.address)}</div>` : ''}
+                <div class="muted small">Added by <b>${esc(c.added_by || 'the app')}</b> on ${fmtDate(c.added_on)}</div>
+                <div class="btns"><a class="btn light sm" href="#/shop/${c.id}">View more details</a></div></div>`
+            )
+            .join('')}
+          <div class="btns"><button class="btn big" data-act="saveDifferent">This is different – add it</button></div>
+          <div class="btns"><button class="btn light" data-act="close">Do not add</button></div>`);
+      }
+      closeSheet();
+      toast('Saved');
+      if (id) history.back();
+      else location.replace(`#/shop/${r.id}`);
+    };
+    await send({});
   };
   // Coming from an IndiaMART enquiry: its details are already filled in.
   const lead = !id && query.lead ? LEADS.get(+query.lead) : null;

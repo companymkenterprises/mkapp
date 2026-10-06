@@ -235,6 +235,20 @@ GLOBAL_ACT.saveDelivery = async (el) => {
 const moneyWentTo = (id, mine) =>
   `<label class="f">Where did the money go?</label>
    <div class="chips" id="${id}"><button class="chip on" data-act="chip" data-val="me">${mine}</button><button class="chip" data-act="chip" data-val="company">Company account</button></div>`;
+// One payment in two ways (part cash, part online): a second amount with its own way and place, opened by a button.
+const secondPay = (id, mine) =>
+  `<div class="btns" id="${id}-more"><button class="btn light sm" data-act="twoWays" data-id="${id}">+ Paid in two ways (part cash, part online)</button></div>
+   <div id="${id}-two" hidden>
+     <label class="f" for="${id}-amount2">Second amount (₹)</label>
+     <input id="${id}-amount2" type="number" inputmode="decimal" min="0" placeholder="The other part of the money">
+     <div class="chips" id="${id}-mode2">${S.boot.payModes.map((m, i) => `<button class="chip${i === 1 ? ' on' : ''}" data-act="chip" data-val="${m}">${m}</button>`).join('')}</div>
+     ${moneyWentTo(`${id}-to2`, mine).replace('Where did the money go?', 'Where did the second amount go?')}
+   </div>`;
+GLOBAL_ACT.twoWays = (el) => {
+  $(`#${el.dataset.id}-two`).hidden = false;
+  $(`#${el.dataset.id}-more`).hidden = true;
+};
+const secondPayBody = (id) => ($(`#${id}-two`).hidden ? {} : { amount2: $(`#${id}-amount2`).value, mode2: chipVal(`${id}-mode2`), to2: chipVal(`${id}-to2`) });
 function showHeld(held) {
   if (!held) return;
   const mine = held.name === S.user.name;
@@ -266,10 +280,11 @@ GLOBAL_ACT.deliver = (el) => {
     <input id="d-amount" type="number" inputmode="decimal" min="0" placeholder="0 if no money received">
     <div class="chips" id="d-mode">${S.boot.payModes.map((m, i) => `<button class="chip${i ? '' : ' on'}" data-act="chip" data-val="${m}">${m}</button>`).join('')}</div>
     ${moneyWentTo('d-to', isStaff() ? 'Account of the person who delivered' : 'My account')}
+    ${secondPay('d', isStaff() ? 'Account of the person who delivered' : 'My account')}
     <div class="btns"><button class="btn big" data-act="confirmDeliver" data-id="${o.id}">Delivered</button></div>`);
 };
 GLOBAL_ACT.confirmDeliver = async (el) => {
-  const r = await api('POST', `/orders/${el.dataset.id}/deliver`, { collected: $('#d-amount').value, mode: chipVal('d-mode'), to: chipVal('d-to'), delivered_by: $('#d-by')?.value || '' });
+  const r = await api('POST', `/orders/${el.dataset.id}/deliver`, { collected: $('#d-amount').value, mode: chipVal('d-mode'), to: chipVal('d-to'), delivered_by: $('#d-by')?.value || '', ...secondPayBody('d') });
   closeSheet();
   toast(`Delivered by ${r.delivered_by_name}. Balance now ${rs(r.balance)}`);
   refresh();
@@ -580,10 +595,18 @@ VIEWS.bill = async (parts, query) => {
 // ---------- expenses ----------
 // Adding an expense: from the Expenses page and from "Company money with me".
 const EXPENSE_ACT = {
-    addExpense: () =>
+    addExpense: async () => {
+      // fresh every time, so a staff member added today is in the list
+      const staff = isStaff() ? (await api('GET', '/staff/names')).list : [];
       sheet(`<h3>Add expense</h3>
         <label class="f">Money spent on</label>
-        <div class="chips" id="x-type">${S.boot.expenseTypes.map((t) => `<button class="chip" data-act="chip" data-val="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+        <div class="chips" id="x-type">${S.boot.expenseTypes.filter((t) => t !== 'Paid to staff' || isStaff()).map((t) => `<button class="chip" data-act="chip" data-val="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+        ${
+          staff.length
+            ? `<label class="f" for="x-for">Given to which staff member? (compulsory for "Paid to staff")</label>
+               <select id="x-for">${options(staff, '', 'Not given to a staff member')}</select>`
+            : ''
+        }
         <label class="f" for="x-amount">Amount (₹)</label>
         <input id="x-amount" type="number" inputmode="decimal" min="1">
         <label class="f" for="x-date">Date</label>
@@ -592,10 +615,12 @@ const EXPENSE_ACT = {
         <div class="chips" id="x-mode">${S.boot.payModes.map((m, i) => `<button class="chip${i ? '' : ' on'}" data-act="chip" data-val="${m}">${m}</button>`).join('')}</div>
         <label class="f" for="x-note">Note (vehicle, bill number, paid to whom) – compulsory only for "Other"</label>
         <input id="x-note" type="text">
-        <div class="btns"><button class="btn big" data-act="saveExpense">Save</button></div>`),
+        <div class="btns"><button class="btn big" data-act="saveExpense">Save</button></div>`);
+    },
     saveExpense: async () => {
       if (!chipVal('x-type')) throw new Error('Select what the money was spent on');
-      await api('POST', '/expenses', { category: chipVal('x-type'), amount: $('#x-amount').value, date: $('#x-date').value, mode: chipVal('x-mode'), note: $('#x-note').value });
+      if (chipVal('x-type') === 'Paid to staff' && !$('#x-for')?.value) throw new Error('Select which staff member got the money');
+      await api('POST', '/expenses', { category: chipVal('x-type'), for_user: $('#x-for')?.value || '', amount: $('#x-amount').value, date: $('#x-date').value, mode: chipVal('x-mode'), note: $('#x-note').value });
       closeSheet();
       toast('Expense saved');
       refresh();
@@ -626,7 +651,7 @@ VIEWS.expenses = async (parts, query) => {
   h += d.list
     .map(
       (e) => `<div class="card row" data-item data-k="${esc(e.category)}">
-        <div class="grow"><b>${esc(e.category)}</b>
+        <div class="grow"><b>${esc(e.category)}${e.for_name ? ` – ${esc(e.for_name)}` : ''}</b>
           <div class="muted small">${esc(dots(fmtDate(e.date), e.mode, e.by))}</div>
           ${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</div>
         <div class="right"><b>${rs(e.amount)}</b>${canRemove(e) ? `<div><button class="btn danger sm" data-act="delExpense" data-id="${e.id}" data-text="${esc(`${e.category} ${rs(e.amount)}, ${fmtDate(e.date)}, entered by ${e.by}`)}">Delete</button></div>` : ''}</div>
@@ -685,6 +710,7 @@ async function staffMoney() {
         (p) => `<a class="card" href="#/money/${p.id}" data-item data-k="${p.left_on ? 'left' : rolesOf(p).join('|')}${p.should > 0 ? '|has' : ''}">
           <div class="row"><b class="grow">${esc(p.name)}</b><b class="${p.should > 0 ? 'red' : ''}">${rs(p.should)}</b></div>
           <div class="muted small">${esc(dots(p.left_on ? 'Ex ' + ROLE_NAME[p.role].toLowerCase() : roleNames(p), p.checked ? 'balance checked ' + fmtDate(p.checked) : 'balance never checked'))}</div>
+          ${p.checked ? `<div class="small">Says they have: <b>${rs(p.has)}</b></div>` : ''}
           <div class="small">${esc(dots('Collected ' + rs(p.collected), `Expenses ${rs(p.spent)} (${p.expense_count})`, p.returned ? 'Gave back ' + rs(p.returned) : '', p.given ? 'Given ' + rs(p.given) : ''))}</div>
         </a>`
       )
@@ -695,6 +721,8 @@ async function staffMoney() {
 VIEWS.money = async (parts) => {
   const other = +parts[1] || 0;
   if (!other && isAdmin()) return staffMoney();
+  // A manager opens the list of the team and the other managers from the own page.
+  if (parts[1] === 'staff' && isStaff()) return staffMoney();
   let d;
   const save = async (body) => {
     const r = await api('POST', '/money/check', body);
@@ -718,7 +746,7 @@ VIEWS.money = async (parts) => {
         <div class="btns"><button class="btn big" data-act="checkAdded" data-has="${has}">I will add ${rs(short)} from my money</button></div>
         <h3>Or: it was used for work</h3>
         <label class="f">Used for</label>
-        <div class="chips" id="mc-type">${S.boot.expenseTypes.map((t) => `<button class="chip" data-act="chip" data-val="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+        <div class="chips" id="mc-type">${S.boot.expenseTypes.filter((t) => t !== 'Paid to staff').map((t) => `<button class="chip" data-act="chip" data-val="${esc(t)}">${esc(t)}</button>`).join('')}</div>
         <label class="f" for="mc-used">Amount used (₹)</label><input id="mc-used" type="number" inputmode="decimal" min="1" max="${short}" value="${short}">
         <label class="f" for="mc-date">When</label><input id="mc-date" type="date" max="${S.boot.today}" value="${S.boot.today}">
         <label class="f" for="mc-note">Where (shop, petrol pump, paid to whom) – compulsory only for "Other"</label><input id="mc-note" type="text">
@@ -735,12 +763,36 @@ VIEWS.money = async (parts) => {
         <label class="f" for="mv-amount">Amount (₹)</label><input id="mv-amount" type="number" inputmode="decimal" min="1" value="${el.dataset.type === 'returned' && d.should > 0 ? d.should : ''}">
         <label class="f" for="mv-mode">How</label><select id="mv-mode">${options(S.boot.payModes.map((x) => ({ id: x, name: x })), 'Cash')}</select>
         <label class="f" for="mv-date">Date</label><input id="mv-date" type="date" max="${S.boot.today}" value="${S.boot.today}">
+        ${el.dataset.type === 'returned' ? `<label class="f" for="mv-to">Paid to (who got the money)</label><input id="mv-to" type="text" maxlength="60" value="${esc(S.user.name)}">` : ''}
         <label class="f" for="mv-note">Note (if any)</label><input id="mv-note" type="text">
         <div class="btns"><button class="btn big" data-act="saveMove" data-type="${el.dataset.type}">Save</button></div>`),
     saveMove: async (el) => {
-      await api('POST', `/money/${d.person.id}/move`, { type: el.dataset.type, amount: $('#mv-amount').value, mode: $('#mv-mode').value, date: $('#mv-date').value, note: $('#mv-note').value });
+      await api('POST', `/money/${d.person.id}/move`, { type: el.dataset.type, amount: $('#mv-amount').value, mode: $('#mv-mode').value, date: $('#mv-date').value, note: $('#mv-note').value, paid_to: $('#mv-to')?.value || '' });
       closeSheet();
       toast('Saved');
+      refresh();
+    },
+    // The staff member hands company money over and enters it: who got it and how much.
+    payCompany: () =>
+      sheet(`<h3>I paid money to the company</h3>
+        <p class="muted">You should have ${rs(d.should)} of company money now.</p>
+        <label class="f" for="pc-amount">Amount paid (₹)</label><input id="pc-amount" type="number" inputmode="decimal" min="1" value="${d.should > 0 ? d.should : ''}">
+        <label class="f">Paid to</label>
+        <div class="chips" id="pc-to">${d.payTo.map((p) => `<button class="chip" data-act="chip" data-val="${esc(p.name)}" data-id="${p.id}">${esc(p.name)}</button>`).join('')}${d.payNames.map((n) => `<button class="chip" data-act="chip" data-val="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+        <p class="muted small">Given to a manager: the money is then with the manager, until the manager pays it to the admin or the company account.</p>
+        <label class="f" for="pc-name">Or type another name</label><input id="pc-name" type="text" maxlength="60" placeholder="The name is kept for next time">
+        <label class="f">How</label>
+        <div class="chips" id="pc-mode">${S.boot.payModes.map((m, i) => `<button class="chip${i ? '' : ' on'}" data-act="chip" data-val="${m}">${m}</button>`).join('')}</div>
+        <label class="f" for="pc-date">Date</label><input id="pc-date" type="date" max="${S.boot.today}" value="${S.boot.today}">
+        <label class="f" for="pc-note">Note (if any)</label><input id="pc-note" type="text">
+        <div class="btns"><button class="btn big" data-act="savePayCompany">Mark as paid</button></div>`),
+    savePayCompany: async () => {
+      const typed = $('#pc-name').value.trim();
+      const to = typed || chipVal('pc-to');
+      if (!to) throw new Error('Select or type the name of who you paid');
+      const r = await api('POST', '/money/pay', { amount: $('#pc-amount').value, paid_to: to, to_id: typed ? '' : $('#pc-to .chip.on')?.dataset.id || '', mode: chipVal('pc-mode'), date: $('#pc-date').value, note: $('#pc-note').value });
+      closeSheet();
+      toast(`Saved: paid to ${to}. You should have ${rs(r.should)} now`);
       refresh();
     },
     delMove: (el) =>
@@ -753,10 +805,16 @@ VIEWS.money = async (parts) => {
   const who = d.own ? 'you' : d.person.name;
   const del = (kind, id, text) => (isAdmin() ? `<div><button class="btn danger sm" data-act="delMove" data-kind="${kind}" data-id="${id}" data-text="${esc(text)}">Delete</button></div>` : '');
   return `${d.own ? '' : `<h2>${esc(d.person.name)}</h2>`}
+    ${d.own && isStaff() && !isAdmin() ? '<div class="btns top-action"><a class="btn light" href="#/money/staff">Company money with executives and managers</a></div>' : ''}
     <div class="banner ${d.should > 0 ? 'warn' : 'ok'}"><div><div class="small">${d.should < 0 ? `The company has to give ${esc(who)}` : `Company money ${d.own ? 'you' : 'they'} should have now`}</div><div class="balance">${rs(Math.abs(d.should))}</div></div></div>
+    ${
+      d.checks.length
+        ? `<div class="banner ${d.checks[0].diff < 0 ? 'bad' : 'ok'}"><div><div class="small">Balance ${d.own ? 'you' : 'they'} entered on ${fmtDate(d.checks[0].date)} – money ${d.own ? 'you have' : 'they have'}</div><div class="balance">${rs(d.checks[0].has)}</div></div></div>`
+        : d.own ? '' : '<p class="muted small">They have not entered their balance yet ("Check my balance").</p>'
+    }
     <div class="table-wrap"><table>
       <tr><td>Collected from customers${d.direct ? `<div class="muted small">${rs(d.direct)} more went straight into the company account – not counted</div>` : ''}</td><td class="num">+ ${rs(d.collected)}</td></tr>
-      <tr><td>Given by the company</td><td class="num">+ ${rs(d.given)}</td></tr>
+      <tr><td>Given by the company, or received from staff</td><td class="num">+ ${rs(d.given)}</td></tr>
       <tr><td>Expenses entered</td><td class="num">− ${rs(d.spent)}</td></tr>
       <tr><td>Given back to the company</td><td class="num">− ${rs(d.returned)}</td></tr>
     </table></div>
@@ -768,7 +826,8 @@ VIEWS.money = async (parts) => {
            <div class="btns"><button class="btn light" data-act="moveMoney" data-type="given">Company gave money to ${esc(d.person.name)}</button></div>`
         : ''
     }
-    ${d.own ? '<p class="muted small">When you hand this money over to the company, the manager enters it and it goes down here.</p>' : ''}
+    ${d.own ? `<div class="btns"><button class="btn big gold" data-act="payCompany">I paid money to the company</button></div>
+      <p class="muted small">When you hand company money over (cash to the owner or manager, or into the company account), enter it here with the name of who got it. It goes down above.</p>` : ''}
     <h3>Balance checks</h3>
     ${
       d.checks.length
@@ -787,8 +846,17 @@ VIEWS.money = async (parts) => {
     ${
       d.expenses.length
         ? `<div class="table-wrap"><table><tr><th>Date</th><th>Spent on</th><th class="num">Amount</th></tr>
-          ${d.expenses.map((e) => `<tr><td>${fmtDate(e.date)}</td><td class="wrap">${esc(e.category)}<div class="muted small">${esc(dots(e.mode, e.note))}</div></td><td class="num">${rs(e.amount)}</td></tr>`).join('')}</table></div>`
+          ${d.expenses.map((e) => `<tr><td>${fmtDate(e.date)}</td><td class="wrap">${esc(e.category)}${e.for_name ? ` – <b>${esc(e.for_name)}</b>` : ''}<div class="muted small">${esc(dots(e.mode, e.note))}</div></td><td class="num">${rs(e.amount)}</td></tr>`).join('')}</table></div>`
         : '<p class="muted">No expenses entered.</p>'
+    }
+    ${
+      d.gotFrom.length
+        ? `<h3>Money given to ${d.own ? 'you' : esc(d.person.name)} by the manager (${d.gotFrom.length})</h3>
+          <p class="muted small">Entered by the manager or the admin as an expense. It is not counted in the company money above.</p>
+          <div class="table-wrap"><table><tr><th>Date</th><th>Given by</th><th class="num">Amount</th></tr>
+          ${d.gotFrom.map((e) => `<tr><td>${fmtDate(e.date)}</td><td class="wrap"><b>${esc(e.by)}</b><div class="muted small">${esc(dots(e.category === 'Paid to staff' ? '' : e.category, e.mode, e.note))}</div></td><td class="num">${rs(e.amount)}</td></tr>`).join('')}
+          <tr><td colspan="2"><b>Total</b></td><td class="num"><b>${rs(d.gotFrom.reduce((s, e) => s + e.amount, 0))}</b></td></tr></table></div>`
+        : ''
     }
     <h3>Money collected into ${d.own ? 'your' : 'their'} account (${d.payments.length})</h3>
     ${
@@ -802,9 +870,10 @@ VIEWS.money = async (parts) => {
       d.moves.length
         ? d.moves
             .map(
-              (m) => `<div class="card row"><div class="grow"><b>${m.type === 'given' ? 'Given by the company' : 'Given back to the company'}</b>
+              (m) => `<div class="card row"><div class="grow"><b>${m.from_name ? `Received from ${esc(m.from_name)}` : m.type === 'given' ? 'Given by the company' : 'Given back to the company'}</b>
+                ${m.paid_to ? `<div>Paid to <b>${esc(m.paid_to)}</b></div>` : ''}
                 <div class="muted small">${esc(dots(fmtDate(m.date), m.mode, m.by ? 'entered by ' + m.by : ''))}</div>
-                ${m.note ? `<div class="muted small">${esc(m.note)}</div>` : ''}</div>
+                ${m.note && !m.from_name ? `<div class="muted small">${esc(m.note)}</div>` : ''}</div>
                 <div class="right"><b>${rs(m.amount)}</b>${del('moves', m.id, `${rs(m.amount)} ${m.type === 'given' ? 'given to' : 'taken from'} ${d.person.name} on ${fmtDate(m.date)}`)}</div></div>`
             )
             .join('')
