@@ -299,16 +299,16 @@ VIEWS.attendance = async (parts, query) => {
   let d;
   Object.assign(ACT, {
     date: (el) => el.value && go(`#/attendance?date=${el.value}`),
-    // Present and half day keep the time of the tap; absent keeps nothing; leave asks for a note first.
+    // Leave asks why first. Half day (any day) and present today open a clock. Absent, and present on a past day, are saved at once.
     mark: async (el) => {
       if (el.dataset.val === 'leave') {
         return sheet(`<h3>Leave of ${esc(el.dataset.name)}</h3>
           <p class="muted">${fmtDate(d.date)} · Leave is with approval and is paid.</p>
-          <label class="f" for="lv-note">Note (if any)</label><input id="lv-note" value="${esc(el.dataset.note || '')}" placeholder="Example: fever, approved by Imran">
+          <label class="f" for="lv-note">Why did they take leave?</label><input id="lv-note" value="${esc(el.dataset.note || '')}" placeholder="Example: fever, approved by Imran">
           <div class="btns"><button class="btn big" data-act="saveLeave" data-id="${el.dataset.id}">Save leave</button></div>`);
       }
-      // Present or half day: a clock opens to choose the coming-in time (the time now, or the one already saved).
-      if (el.dataset.val !== 'absent') {
+      // A clock opens to choose the coming-in time (the time now, or the one already saved).
+      if (el.dataset.val === 'half' || (el.dataset.val === 'present' && d.date === d.today)) {
         const now = new Date();
         const hm = clock24(el.dataset.time) || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
         return sheet(`<h3>${ATT[el.dataset.val]} – ${esc(el.dataset.name)}</h3>
@@ -316,7 +316,7 @@ VIEWS.attendance = async (parts, query) => {
           <label class="f" for="at-time">Came in at</label><input id="at-time" type="time" value="${hm}">
           <div class="btns"><button class="btn big" data-act="saveMark" data-id="${el.dataset.id}" data-val="${el.dataset.val}">Mark ${ATT[el.dataset.val].toLowerCase()}</button></div>`);
       }
-      // Absent: no time. The tapped button lights up at once; the saving goes on behind.
+      // Absent, or present on a past day: no clock. The tapped button lights up at once; the saving goes on behind.
       $$('.chip', el.parentElement).forEach((c) => c.classList.toggle('on', c === el));
       await api('PUT', '/attendance', { user_id: el.dataset.id, date: d.date, status: el.dataset.val });
       refresh();
@@ -329,6 +329,7 @@ VIEWS.attendance = async (parts, query) => {
       refresh();
     },
     saveLeave: async (el) => {
+      if ($('#lv-note').value.trim().length < 3) throw new Error('Write why they took leave');
       await api('PUT', '/attendance', { user_id: el.dataset.id, date: d.date, status: 'leave', note: $('#lv-note').value });
       closeSheet();
       toast('Leave saved');
@@ -358,7 +359,7 @@ VIEWS.attendance = async (parts, query) => {
               (u) => `<div class="card" data-item><div class="row"><b class="grow">${esc(u.name)}</b><span class="muted small">${u.in_time ? 'Came in: ' + esc(u.in_time) : ''}</span></div>
                 ${u.status === 'leave' && u.note ? `<div class="muted small">Leave note: ${esc(u.note)}</div>` : ''}
                 <div class="chips">${Object.entries(ATT).map(([v, t]) => `<button class="chip${u.status === v ? ' on' : ''}" data-act="mark" data-id="${u.id}" data-val="${v}" data-name="${esc(u.name)}" data-note="${esc(u.note || '')}" data-time="${esc(u.in_time || '')}">${t}</button>`).join('')}</div>
-                <div class="btns"><button class="btn light sm" data-act="overtime" data-id="${u.id}" data-name="${esc(u.name)}" data-hours="${u.ot_hours}">${u.ot_hours ? `Overtime: ${num(u.ot_hours)} h` : '+ Overtime'}</button></div></div>`
+                ${u.name_only ? '' : `<div class="btns"><button class="btn light sm" data-act="overtime" data-id="${u.id}" data-name="${esc(u.name)}" data-hours="${u.ot_hours}">${u.ot_hours ? `Overtime: ${num(u.ot_hours)} h` : '+ Overtime'}</button></div>`}</div>`
             )
             .join('') +
           '</div>'
@@ -591,6 +592,24 @@ VIEWS.leads = async (parts, query) => {
       toast(r.added ? `${r.added} new ${r.added === 1 ? 'enquiry' : 'enquiries'} came` : 'No new enquiries');
       refresh();
     },
+    // An enquiry typed in by hand: seen on IndiaMART, or it came by phone.
+    addLead: () =>
+      sheet(`<h3>Add enquiry</h3>
+        <label class="f" for="ld-company">Company or shop name</label><input id="ld-company" maxlength="100">
+        <label class="f" for="ld-name">Name of the person</label><input id="ld-name" maxlength="100">
+        <label class="f" for="ld-mobile">Mobile number (if any)</label><input id="ld-mobile" type="tel" inputmode="numeric" maxlength="10" data-input="digits">
+        <label class="f" for="ld-city">City or area</label><input id="ld-city" maxlength="100">
+        <label class="f" for="ld-product">What do they want?</label><input id="ld-product" maxlength="200" placeholder="Example: Ginger garlic paste 5 kg, 20 boxes">
+        <label class="f" for="ld-message">Message (if any)</label><textarea id="ld-message" maxlength="1000"></textarea>
+        <div class="btns"><button class="btn big" data-act="saveLead">Save enquiry</button></div>`),
+    saveLead: async () => {
+      if (!$('#ld-company').value.trim() && !$('#ld-name').value.trim()) throw new Error('Enter the name of the person or of the company');
+      await api('POST', '/leads', { company: $('#ld-company').value, name: $('#ld-name').value, mobile: $('#ld-mobile').value, city: $('#ld-city').value, product: $('#ld-product').value, message: $('#ld-message').value });
+      closeSheet();
+      toast('Enquiry saved');
+      if (done) go('#/leads');
+      else refresh();
+    },
     closeLead: async (el) => {
       await api('POST', `/leads/${el.dataset.id}/close`, { customer_id: el.dataset.customer || '' });
       toast('Done');
@@ -607,10 +626,11 @@ VIEWS.leads = async (parts, query) => {
   for (const l of d.list) LEADS.set(l.id, l);
 
   let h = `<div class="tabs"><a href="#/leads" class="${done ? '' : 'on'}">New</a><a href="#/leads?tab=done" class="${done ? 'on' : ''}">Done</a></div>`;
+  h += `<div class="btns top-action"><button class="btn big" data-act="addLead">${icon('plus', 20)} Add enquiry</button></div>`;
   if (!d.on) {
-    const notice = `IndiaMART is not connected yet.<br>${isAdmin() ? 'Add the IndiaMART key in <a href="#/settings">Settings</a>.' : 'The admin adds the IndiaMART key in Settings.'}`;
-    if (!d.list.length) return h + `<div class="empty">${notice}</div>`;
-    h += `<div class="banner warn"><span class="small">${notice}</span></div>`;
+    // Not connected to IndiaMART: the enquiries are typed in by hand.
+    h += '<p class="muted small">Type in each enquiry you get on IndiaMART (or by phone) with "Add enquiry". Then call them, and add them as a shop or customer.</p>';
+    if (!d.list.length) return h + `<div class="empty">${done ? 'Nothing here yet.' : 'No enquiries yet.'}</div>`;
   } else {
     if (d.problem) h += `<div class="banner bad">${esc(d.problem)}</div>`;
     h += `<div class="btns"><button class="btn light" data-act="syncLeads">Check now</button></div>
@@ -626,6 +646,7 @@ VIEWS.leads = async (parts, query) => {
         (l) => `<div class="card" data-item>
           <div class="row"><b class="grow">${esc(l.company || l.name || 'No name')}</b><span class="muted small">${fmtAt(l.received_at)}</span></div>
           <div class="muted">${esc(dots(l.company ? l.name : '', l.city))}</div>
+          ${l.source === 'manual' ? `<div class="muted small">Typed in by ${esc(l.added_by || 'staff')}</div>` : ''}
           ${l.product ? `<div><b>Wants:</b> ${esc(l.product)}</div>` : ''}
           ${l.message ? `<div class="pre small">${esc(l.message)}</div>` : ''}
           ${l.status === 'customer' && l.customer_id ? `<div class="btns"><a class="btn light sm" href="#/shop/${l.customer_id}">Open customer</a></div>` : ''}

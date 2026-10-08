@@ -710,7 +710,7 @@ async function staffMoney() {
         (p) => `<a class="card" href="#/money/${p.id}" data-item data-k="${p.left_on ? 'left' : rolesOf(p).join('|')}${p.should > 0 ? '|has' : ''}">
           <div class="row"><b class="grow">${esc(p.name)}</b><b class="${p.should > 0 ? 'red' : ''}">${rs(p.should)}</b></div>
           <div class="muted small">${esc(dots(p.left_on ? 'Ex ' + ROLE_NAME[p.role].toLowerCase() : roleNames(p), p.checked ? 'balance checked ' + fmtDate(p.checked) : 'balance never checked'))}</div>
-          ${p.checked ? `<div class="small">Says they have: <b>${rs(p.has)}</b></div>` : ''}
+          ${p.checked ? `<div class="small">Says they have: <b>${rs(p.has_now)}</b>${p.has_now !== p.has ? ` <span class="muted">(entered ${rs(p.has)}, then spent or collected)</span>` : ''}</div>` : ''}
           <div class="small">${esc(dots('Collected ' + rs(p.collected), `Expenses ${rs(p.spent)} (${p.expense_count})`, p.returned ? 'Gave back ' + rs(p.returned) : '', p.given ? 'Given ' + rs(p.given) : ''))}</div>
         </a>`
       )
@@ -803,13 +803,16 @@ VIEWS.money = async (parts) => {
   });
   d = await api('GET', other ? `/money/${other}` : '/money');
   const who = d.own ? 'you' : d.person.name;
+  // The balance they entered goes down with an expense entered after it, and up with money collected after it.
+  const moved = d.checks.length > 0 && d.hasNow !== d.checks[0].has;
   const del = (kind, id, text) => (isAdmin() ? `<div><button class="btn danger sm" data-act="delMove" data-kind="${kind}" data-id="${id}" data-text="${esc(text)}">Delete</button></div>` : '');
   return `${d.own ? '' : `<h2>${esc(d.person.name)}</h2>`}
     ${d.own && isStaff() && !isAdmin() ? '<div class="btns top-action"><a class="btn light" href="#/money/staff">Company money with executives and managers</a></div>' : ''}
     <div class="banner ${d.should > 0 ? 'warn' : 'ok'}"><div><div class="small">${d.should < 0 ? `The company has to give ${esc(who)}` : `Company money ${d.own ? 'you' : 'they'} should have now`}</div><div class="balance">${rs(Math.abs(d.should))}</div></div></div>
     ${
       d.checks.length
-        ? `<div class="banner ${d.checks[0].diff < 0 ? 'bad' : 'ok'}"><div><div class="small">Balance ${d.own ? 'you' : 'they'} entered on ${fmtDate(d.checks[0].date)} – money ${d.own ? 'you have' : 'they have'}</div><div class="balance">${rs(d.checks[0].has)}</div></div></div>`
+        ? `<div class="banner ${d.checks[0].diff < 0 ? 'bad' : 'ok'}"><div><div class="small">Balance ${d.own ? 'you' : 'they'} entered on ${fmtDate(d.checks[0].date)} – money ${d.own ? 'you have' : 'they have'}${moved ? ' now' : ''}</div><div class="balance">${rs(d.hasNow)}</div>
+            ${moved ? `<div class="small">${d.own ? 'You' : 'They'} entered ${rs(d.checks[0].has)}. Expenses and money entered after that are counted.</div>` : ''}</div></div>`
         : d.own ? '' : '<p class="muted small">They have not entered their balance yet ("Check my balance").</p>'
     }
     <div class="table-wrap"><table>

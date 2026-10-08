@@ -219,7 +219,7 @@ VIEWS.shop = async (parts) => {
         ${d.calls.map((l) => `<tr><td>${fmtDate(l.date)}</td><td class="wrap">${esc(LAST_CALL[l.outcome])}${l.reason && l.outcome !== 'no_answer' ? ' – ' + esc(l.reason) : ''}</td><td>${esc(l.by)}</td></tr>`).join('')}</table></div>`
       : '<p class="muted">No calls yet.</p>'
   }`;
-  if (isAdmin()) {
+  if (isStaff()) {
     h += `<h3>Delete</h3><p class="muted small">Only for a wrong or test entry. For a customer who stopped buying, use "Not needed" instead.</p>
       <div class="btns"><button class="btn danger" data-act="delCustomer" ${attrs}>Delete this customer</button></div>`;
   }

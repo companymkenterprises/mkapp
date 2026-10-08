@@ -165,7 +165,7 @@ GLOBAL_ACT.chip = (el) => {
 function chipVal(groupId) {
   return $(`#${groupId} .chip.on`)?.dataset.val ?? '';
 }
-// ---------- deleting (admin only): always asks first ----------
+// ---------- deleting (admin only, a customer also by the manager): always asks first ----------
 let deleteJob = null;
 function askDelete(title, text, job) {
   deleteJob = job;

@@ -1,6 +1,6 @@
 // Keeps the app screens available when the network is weak. Data is never cached:
 // it comes from another address (Supabase), or from /api on this computer, and both are left alone.
-const CACHE = 'paste-manager-v32';
+const CACHE = 'paste-manager-v34';
 const HOME = new URL('./', location.href).href;
 
 self.addEventListener('install', () => self.skipWaiting());
