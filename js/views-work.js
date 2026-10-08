@@ -143,7 +143,7 @@ VIEWS.calls = async (parts, query) => {
       const attrs = `data-id="${c.id}" data-name="${esc(c.name)}"`;
       return `<div class="card" data-item>
         <div class="row"><a class="grow" href="#/shop/${c.id}"><b>${esc(c.name)}</b></a>${lateDays ? `<span class="tag late">${plural(lateDays, 'day')} late</span>` : ''}</div>
-        <div class="muted">${esc(dots(routeText(c.route, c.type), c.owner))}</div>
+        <div class="muted">${esc(dots(routeText(c.route, c.type), oldName(c), c.owner))}</div>
         ${c.balance > 0 ? `<div class="red"><b>Balance to collect: ${rs(c.balance)}</b></div>` : ''}
         ${c.pending_orders ? '<div class="muted">Has an order waiting for delivery</div>' : ''}
         ${c.last_outcome ? `<div class="muted small">Last time: ${esc(LAST_CALL[c.last_outcome])}${c.last_outcome === 'later' && c.last_reason ? ' – ' + esc(c.last_reason) : ''}</div>` : ''}

@@ -80,6 +80,10 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // Only a shop needs a route. A direct customer without one shows nothing.
 const routeText = (route, type) => route || (type === 'customer' ? '' : 'No route yet');
 const dots = (...parts) => parts.filter(Boolean).join(' · ');
+// A shop that changed its name: the old one is shown next to the new one, so people still recognise it.
+const oldName = (c) => (c.old_name ? 'Old name: ' + c.old_name : '');
+// Under the name in the customers list: the old name, then the owner (for a direct customer: the contact person).
+const knownAs = (c) => dots(oldName(c), c.owner ? (c.type === 'customer' ? 'Contact: ' : 'Owner: ') + c.owner : '');
 // A bag is opened by the packet, a box by the piece.
 const looseWord = (unit) => (unit === 'Bag' ? 'packet' : 'piece');
 // How many pieces one box, bag or drum holds, said plainly: "1 box = 30 pieces", "1 bag = 50 packets". A drum is one piece: "1 drum".

@@ -17,6 +17,7 @@ VIEWS.shops = async (parts, query) => {
             .map(
               (c) => `<a class="card link row" href="#/shop/${c.id}">
                 <div class="grow"><b>${esc(c.name)}</b>
+                  ${knownAs(c) ? `<div class="small">${esc(knownAs(c))}</div>` : ''}
                   <div class="muted">${dots(TYPE_NAME[c.type], c.route ? esc(c.route) : c.type === 'shop' ? '<span class="gold">No route yet</span>' : '', esc(c.mobile))}</div></div>
                 <div class="right">${c.balance > 0 ? `<b class="red">${rs(c.balance)}</b><div class="muted small">balance</div>` : '<span class="muted small">No balance</span>'}</div>
               </a>`
@@ -163,6 +164,7 @@ VIEWS.shop = async (parts) => {
   const attrs = `data-id="${c.id}" data-name="${esc(c.name)}"`;
 
   let h = `<h2>${esc(c.name)}</h2>
+    ${c.old_name ? `<p>Old name: <b>${esc(c.old_name)}</b></p>` : ''}
     <p class="muted">${[TYPE_NAME[c.type], c.owner, c.route].filter(Boolean).map(esc).join(' · ')}</p>
     ${c.mobile ? `<div class="btns">${tel(c.mobile)}</div>` : '<p class="muted small">No mobile number saved</p>'}
     ${c.gst ? `<p class="muted">GST no: <b>${esc(c.gst)}</b></p>` : ''}
@@ -246,7 +248,7 @@ VIEWS.shopform = async (parts, query) => {
   const id = +parts[1] || 0;
   const newType = query.type === 'customer' ? 'customer' : 'shop';
   ACT.saveShop = async () => {
-    const body = { type: id ? $('#f-type').value : newType, name: $('#f-name').value, owner: $('#f-owner').value, mobile: $('#f-mobile').value, route_id: $('#f-route')?.value || '', address: $('#f-address').value, gst: $('#f-gst').value };
+    const body = { type: id ? $('#f-type').value : newType, name: $('#f-name').value, old_name: $('#f-old').value, owner: $('#f-owner').value, mobile: $('#f-mobile').value, route_id: $('#f-route')?.value || '', address: $('#f-address').value, gst: $('#f-gst').value };
     if (isStaff()) Object.assign(body, { opening_balance: $('#f-balance').value, call_every_days: $('#f-every').value });
     if (!id) Object.assign(body, { rates: typedRates(), lead_id: query.lead || '' });
     const send = async (extra) => {
@@ -260,6 +262,7 @@ VIEWS.shopform = async (parts, query) => {
           ${r.duplicate
             .map(
               (c) => `<div class="card"><b>${esc(c.name)}</b>
+                ${c.old_name ? `<div class="small">${esc(oldName(c))}</div>` : ''}
                 <div class="muted">${esc(dots(TYPE_NAME[c.type], c.owner, c.route, c.mobile))}</div>
                 ${c.address ? `<div class="small">${mapLink(c.address)}</div>` : ''}
                 <div class="muted small">Added by <b>${esc(c.added_by || 'the app')}</b> on ${fmtDate(c.added_on)}</div>
@@ -295,6 +298,7 @@ VIEWS.shopform = async (parts, query) => {
     <h2>${id ? 'Edit details' : shop ? 'New shop' : 'New customer'}</h2>
     ${id ? `<label class="f" for="f-type">Shop or customer</label><select id="f-type">${options([{ id: 'shop', name: 'Shop' }, { id: 'customer', name: 'Customer' }], c.type)}</select>` : ''}
     <label class="f" for="f-name">${shop ? 'Shop name' : 'Customer name'}</label><input id="f-name" value="${esc(c.name)}" required>
+    <label class="f" for="f-old">Old name (if the name was changed)</label><input id="f-old" maxlength="100" value="${esc(c.old_name || '')}" placeholder="The name it had before">
     <label class="f" for="f-owner">${shop ? 'Owner name' : 'Contact person (if any)'}</label><input id="f-owner" value="${esc(c.owner)}">
     <label class="f" for="f-mobile">Mobile number (if any)</label><input id="f-mobile" type="tel" inputmode="numeric" maxlength="10" value="${esc(c.mobile)}" data-input="digits">
     ${routeField}

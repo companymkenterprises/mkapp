@@ -561,7 +561,7 @@ VIEWS.lost = async () => {
         const attrs = `data-id="${c.id}" data-name="${esc(c.name)}"`;
         return `<div class="card" data-item data-k="${c.state}">
         <div class="row"><a class="grow" href="#/shop/${c.id}"><b>${esc(c.name)}</b></a>${TAG[c.state]}</div>
-        <div class="muted">${esc(dots(routeText(c.route, c.type), c.owner, 'lost on ' + fmtDate(c.lost_at)))}</div>
+        <div class="muted">${esc(dots(routeText(c.route, c.type), oldName(c), c.owner, 'lost on ' + fmtDate(c.lost_at)))}</div>
         <div><b>Reason:</b> ${esc(c.lost_reasons || '')}${c.lost_note ? ' – ' + esc(c.lost_note) : ''}</div>
         <div class="muted small">Marked by ${esc(c.lost_by_name || '')}</div>
         ${c.state === 'later' ? `<div class="small"><b>Call again on ${dayLabel(c.lost_retry_date)}</b>${c.lost_last_note ? ' – ' + esc(c.lost_last_note) : ''}</div>` : ''}
